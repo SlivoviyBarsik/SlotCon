@@ -1,0 +1,40 @@
+#!/bin/bash
+#SBATCH -N 1            # number of nodes on which to run
+#SBATCH --gres=gpu:1        # number of gpus
+#SBATCH --ntasks=8
+#SBATCH --tasks-per-node=8
+#SBATCH --cpus-per-task=4
+#SBATCH --exclude="gpu138"
+#SBATCH --time=5:00:00      # time limit
+#SBATCH --mem=64GB         # minimum amount of real memory
+#SBATCH --job-name=slotcon
+#SBATCH --open-mode=append
+#SBATCH --qos=scavenger
+#SBATCH --signal=B:USR1@30
+
+arch=$1
+dim_out=$2
+dim_hidden=$3
+
+# trap handler - resubmit ourselves
+handler()
+{
+        echo "function handler called at $(date)"	
+	
+	kill -SIGUSR1 "$child" 
+	cd
+        sbatch ~/SlotCon/slurm_scripts/job-atari-assault "$arch" "$dim_out" "$dim_hidden" 
+	echo $arc $dim_out $dim_hidden
+}
+# register signal handler
+trap handler SIGUSR1
+trap 'kill -SIGUSR1 "$child"' SIGTERM
+
+echo $1 $2 $3 
+cd ~/SlotCon
+source ./venv/bin/activate
+
+bash scripts/slotcon_atari_assault_800ep.sh $arch $dim_out $dim_hidden &
+child=$!
+
+wait "$child"

@@ -237,6 +237,8 @@ class ResNet(nn.Module):
 
         return out
 
+def resnet_small(**kwargs):
+    return ResNet(BasicBlock, [1, 1, 1, 1], **kwargs)
 
 def resnet18(**kwargs):
     return ResNet(BasicBlock, [2, 2, 2, 2], **kwargs)

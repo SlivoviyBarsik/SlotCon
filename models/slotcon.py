@@ -91,7 +91,7 @@ class SlotCon(nn.Module):
         self.dim_out = args.dim_out
         self.teacher_momentum = args.teacher_momentum
 
-        self.num_channels = 512 if args.arch in ('resnet18', 'resnet34') else 2048
+        self.num_channels = 512 if args.arch in ('resnet_small', 'resnet18', 'resnet34') else 2048
         self.encoder_q = encoder(head_type='early_return')
         self.encoder_k = encoder(head_type='early_return')
 
@@ -241,7 +241,7 @@ class SlotConEval(nn.Module):
         self.dim_hidden = args.dim_hidden
         self.dim_out = args.dim_out
 
-        self.num_channels = 512 if args.arch in ('resnet18', 'resnet34') else 2048
+        self.num_channels = 512 if args.arch in ('resnet_small', 'resnet18', 'resnet34') else 2048
         self.encoder_k = encoder(head_type='early_return')
         for param_k in self.encoder_k.parameters():
             param_k.requires_grad = False  # not update by gradient
