@@ -20,6 +20,8 @@ class ImageFolder(Dataset):
             self.fnames = list(glob.glob(data_dir + '/train2017/*.jpg')) + list(glob.glob(data_dir + '/unlabeled2017/*.jpg'))
         elif dataset == 'COCOval':
             self.fnames = list(glob.glob(data_dir + '/val2017/*.jpg'))
+        elif dataset == 'atari':
+            self.fnames = list(glob.glob(data_dir + '/*.jpg'))
         else:
             raise NotImplementedError
 

@@ -27,7 +27,7 @@ def get_parser():
     parser = argparse.ArgumentParser('SlotCon')
 
     # dataset
-    parser.add_argument('--dataset', type=str, default='COCO', choices=['COCO', 'COCOplus', 'ImageNet'], help='dataset type')
+    parser.add_argument('--dataset', type=str, default='COCO', choices=['COCO', 'COCOplus', 'ImageNet', 'atari'], help='dataset type')
     parser.add_argument('--data-dir', type=str, default='./data', help='dataset director')
     parser.add_argument('--image-size', type=int, default=224, help='image crop size')
     parser.add_argument('--min-scale', type=float, default=0.08, help='minimum crop scale')
