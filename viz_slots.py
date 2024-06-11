@@ -66,6 +66,71 @@ def viz_slots(dataset, dots, idxs, slot_idxs, args):
     fig.tight_layout()
     fig.savefig(args.save_path, bbox_inches='tight')
 
+def make_masked_image(image, dots, colors, alpha):
+    pred = transforms.functional.resize(dots, image.shape[:2], TF.InterpolationMode.BILINEAR)
+    mask = torch.zeros_like(pred).scatter_(0, pred.argmax(0, keepdim=True), 1)
+    
+    for i in range(dots.shape[0]):
+        m = mask[i].unsqueeze(-1).cpu().numpy()
+        image = np.int32((args.alpha * (image * m) + (1 - alpha) * colors[i] * m) + (image * (1 - m)))
+
+    return image
+
+def make_gif(dataset, dots, args):
+    from matplotlib.animation import FuncAnimation
+
+    cmap = plt.get_cmap('hsv')
+    colors = cmap(np.linspace(0,1,dots.shape[1]))
+    colors = (colors[:,:3] * 255).astype(int)
+    colors = colors.reshape(dots.shape[1],1,1,3)
+
+    fig, ax = plt.subplots(figsize=(10,10))
+    ax.axis('off')
+
+    image = denorm(dataset[0]).numpy()
+    image = make_masked_image(image, dots[0], colors, args.alpha)
+
+    frame = ax.imshow(image)
+    
+    def animate(i):
+        image = denorm(dataset[i]).numpy()
+        image = make_masked_image(image, dots[i], colors, args.alpha)
+
+        frame.set_data(image)
+
+    anim = FuncAnimation(fig, animate, interval=500, frames=len(dataset)-1)
+
+    plt.draw()
+    plt.show()
+
+    anim.save('test.gif')
+
+
+def viz_all_slots(dataset, dots, idxs, slot_idxs, args):
+    cmap = plt.get_cmap('hsv')
+    colors = cmap(np.linspace(0,1,len(slot_idxs)))
+    colors = (colors[:,:3] * 255).astype(int)
+    colors = colors.reshape(len(slot_idxs),1,1,3)
+
+    fig, ax = plt.subplots(args.topk+1, len(slot_idxs), figsize=(len(slot_idxs)*2, args.topk*2), squeeze=False, dpi=args.dpi)
+    
+    for i, slot_idx in enumerate(tqdm(slot_idxs, desc='KNN retreiving', leave=False, disable=False)):
+        # ax[0, i].set_title(i)
+        for j in range(args.topk):
+            idx = idxs[slot_idx, j]
+            image = denorm(dataset[idx]).numpy()
+            pred = transforms.functional.resize(dots[idx], image.shape[:2], TF.InterpolationMode.BILINEAR)
+            mask = torch.zeros_like(pred).scatter_(0, pred.argmax(0, keepdim=True), 1)
+            for si in range(len(slot_idxs)):
+                m = mask[slot_idxs[si]].unsqueeze(-1).cpu().numpy()
+                image = np.int32((args.alpha * (image * m) + (1 - args.alpha) * colors[si] * m) + (image * (1 - m)))
+            ax[j, i].imshow(image)
+            ax[j, i].axis('off')
+        ax[args.topk,i].imshow(np.tile(colors[i], (10,128,1)))
+        ax[args.topk,i].axis('off')
+    fig.tight_layout()
+    fig.savefig(args.save_path, bbox_inches='tight')
+
 
 if __name__=='__main__':
     parser = argparse.ArgumentParser()
@@ -101,4 +166,6 @@ if __name__=='__main__':
         slot_idxs = args.idxs
     else:
         slot_idxs = range(args.num_prototypes)
-    viz_slots(dataset, dots, idxs, slot_idxs, args)
+    # viz_slots(dataset, dots, idxs, slot_idxs, args)
+    # viz_all_slots(dataset, dots, idxs, slot_idxs, args)
+    make_gif(dataset, dots, args)
