@@ -4,7 +4,7 @@ import math
 
 import torch.nn as nn
 
-__all__ = ['ResNet', 'resnet18', 'resnet34', 'resnet50', 'resnet101', 'resnet152',
+__all__ = ['ResNet', 'resnet_small', 'resnet18', 'resnet34', 'resnet50', 'resnet101', 'resnet152',
            'resnet18_d', 'resnet34_d', 'resnet50_d', 'resnet101_d', 'resnet152_d',
            'resnet50_16s', 'resnet50_w2x', 'resnext101_32x8d', 'resnext152_32x8d']
 
