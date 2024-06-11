@@ -91,7 +91,13 @@ class SlotCon(nn.Module):
         self.dim_out = args.dim_out
         self.teacher_momentum = args.teacher_momentum
 
-        self.num_channels = 512 if args.arch in ('resnet_small', 'resnet18', 'resnet34') else 2048
+        if args.arch in ('resnet_small', 'resnet18', 'resnet34'):
+            self.num_channels = 512  
+        elif args.arch == 'spr_cnn':
+            self.num_channels = 64
+        else:
+            self.num_channels = 2048
+            
         self.encoder_q = encoder(head_type='early_return')
         self.encoder_k = encoder(head_type='early_return')
 

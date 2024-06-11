@@ -4,7 +4,7 @@ import math
 
 import torch.nn as nn
 
-__all__ = ['ResNet', 'resnet_small', 'resnet18', 'resnet34', 'resnet50', 'resnet101', 'resnet152',
+__all__ = ['ResNet', 'spr_cnn', 'resnet_small', 'resnet18', 'resnet34', 'resnet50', 'resnet101', 'resnet152',
            'resnet18_d', 'resnet34_d', 'resnet50_d', 'resnet101_d', 'resnet152_d',
            'resnet50_16s', 'resnet50_w2x', 'resnext101_32x8d', 'resnext152_32x8d']
 
@@ -236,6 +236,56 @@ class ResNet(nn.Module):
             raise NotImplementedError
 
         return out
+    
+class Conv2dModel(nn.Module):
+    """2-D Convolutional model component, with option for max-pooling vs
+    downsampling for strides > 1.  Requires number of input channels, but
+    not input shape.  Uses ``torch.nn.Conv2d``.
+    """
+
+    def __init__(
+            self,
+            channels,
+            kernel_sizes,
+            strides,
+            in_channels=3,
+            paddings=None,
+            nonlinearity=nn.ReLU,  # Module, not Functional.
+            use_maxpool=False,  # if True: convs use stride 1, maxpool downsample.
+            head_sizes=None,  # Put an MLP head on top.
+            dropout=0.,
+            ):
+        super().__init__()
+        
+        if paddings is None:
+            paddings = [0 for _ in range(len(channels))]
+        assert len(channels) == len(kernel_sizes) == len(strides) == len(paddings)
+        in_channels = [in_channels] + channels[:-1]
+        ones = [1 for _ in range(len(strides))]
+        if use_maxpool:
+            maxp_strides = strides
+            strides = ones
+        else:
+            maxp_strides = ones
+        conv_layers = [nn.Conv2d(in_channels=ic, out_channels=oc,
+            kernel_size=k, stride=s, padding=p) for (ic, oc, k, s, p) in
+            zip(in_channels, channels, kernel_sizes, strides, paddings)]
+        sequence = list()
+        for conv_layer, maxp_stride in zip(conv_layers, maxp_strides):
+            sequence.extend([conv_layer, nonlinearity()])
+            if dropout > 0:
+                sequence.append(nn.Dropout(dropout))
+            if maxp_stride > 1:
+                sequence.append(nn.MaxPool2d(maxp_stride))  # No padding.
+        self.conv = nn.Sequential(*sequence)
+
+    def forward(self, input):
+        """Computes the convolution stack on the input; assumes correct shape
+        already: [B,C,H,W]."""
+        return self.conv(input)
+    
+def spr_cnn(**kwargs):
+    return Conv2dModel(channels=[32,64,64], kernel_sizes=[8,4,3], strides=[4,2,1])
 
 def resnet_small(**kwargs):
     return ResNet(BasicBlock, [1, 1, 1, 1], **kwargs)
