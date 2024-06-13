@@ -157,6 +157,13 @@ class ResNet(nn.Module):
             pass
         else:
             raise NotImplementedError
+        
+        if return_idx < 4:
+            self.layer4 = nn.Identity()
+        if return_idx < 3:
+            self.layer3 = nn.Identity()
+        if return_idx < 2:
+            self.layer2 = nn.Identity()
 
         for m in self.modules():
             if isinstance(m, nn.Conv2d):
@@ -214,14 +221,8 @@ class ResNet(nn.Module):
             return c2, c3, c4, c5
 
         if self.head_type == 'early_return':
-            if self.return_idx == 4:
-                return c5
-            if self.return_idx == 3:
-                return c4 
-            if self.return_idx == 2:
-                return c3 
-            if self.return_idx == 1:
-                return c2 
+            return c5
+            
 
         if self.head_type != 'conv_head':
             c5 = self.avgpool(c5)
