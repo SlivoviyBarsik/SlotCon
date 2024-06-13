@@ -95,6 +95,8 @@ class SlotCon(nn.Module):
             self.num_channels = 512  
         elif args.arch == 'spr_cnn':
             self.num_channels = 64
+        elif args.arch == 'resnet3l':
+            self.num_channels = 256 
         else:
             self.num_channels = 2048
             

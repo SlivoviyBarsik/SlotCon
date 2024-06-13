@@ -4,7 +4,7 @@ import math
 
 import torch.nn as nn
 
-__all__ = ['ResNet', 'spr_cnn', 'resnet_small', 'resnet18', 'resnet34', 'resnet50', 'resnet101', 'resnet152',
+__all__ = ['ResNet', 'spr_cnn', 'resnet3l', 'resnet_small', 'resnet18', 'resnet34', 'resnet50', 'resnet101', 'resnet152',
            'resnet18_d', 'resnet34_d', 'resnet50_d', 'resnet101_d', 'resnet152_d',
            'resnet50_16s', 'resnet50_w2x', 'resnext101_32x8d', 'resnext152_32x8d']
 
@@ -104,13 +104,16 @@ class ResNet(nn.Module):
                  groups=1, width_per_group=64,
                  mid_dim=1024, low_dim=128,
                  avg_down=False, deep_stem=False,
-                 head_type='mlp_head', layer4_dilation=1):
+                 head_type='mlp_head', layer4_dilation=1,
+                 return_idx=4):
         super(ResNet, self).__init__()
         self.avg_down = avg_down
         self.inplanes = 64 * width
         self.base = int(64 * width)
         self.groups = groups
         self.base_width = width_per_group
+
+        self.return_idx = return_idx
 
         mid_dim = self.base * 8 * block.expansion
 
@@ -211,7 +214,14 @@ class ResNet(nn.Module):
             return c2, c3, c4, c5
 
         if self.head_type == 'early_return':
-            return c5
+            if self.return_idx == 4:
+                return c5
+            if self.return_idx == 3:
+                return c4 
+            if self.return_idx == 2:
+                return c3 
+            if self.return_idx == 1:
+                return c2 
 
         if self.head_type != 'conv_head':
             c5 = self.avgpool(c5)
@@ -284,6 +294,9 @@ class Conv2dModel(nn.Module):
         already: [B,C,H,W]."""
         return self.conv(input)
     
+def resnet3l(**kwargs):
+    return ResNet(BasicBlock, [1, 1, 1, 1], return_idx=3, **kwargs)
+
 def spr_cnn(**kwargs):
     return Conv2dModel(channels=[32,64,64], kernel_sizes=[8,4,3], strides=[4,2,1])
 
