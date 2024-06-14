@@ -5,6 +5,8 @@ import torch.nn.functional as F
 import torch.distributed as dist
 import torchvision
 
+from nerv.models.transformer import build_transformer_encoder
+
 class DINOHead(nn.Module):
     def __init__(self, in_dim, use_bn=True, nlayers=3, hidden_dim=4096, bottleneck_dim=256):
         super().__init__()
@@ -196,6 +198,8 @@ class SlotCon(nn.Module):
 
     def forward(self, input):
         crops, coords, flags = input
+        if len(crops[0].shape) > 4: 
+            crops = [crops[0][:,0], crops[1][:,0]]  # ignore stack
         x1, x2 = self.projector_q(self.encoder_q(crops[0])), self.projector_q(self.encoder_q(crops[1]))
         with torch.no_grad():  # no gradient to keys
             self._momentum_update_key_encoder()  # update the key encoder
@@ -267,3 +271,68 @@ class SlotConEval(nn.Module):
         with torch.no_grad():
             slots, probs = self.grouping_k(self.projector_k(self.encoder_k(x)))
             return probs
+        
+
+class SlotConSPR(SlotCon):
+    def __init__(self, encoder, args):
+        super().__init__(encoder, args)
+
+        self.transformer_transition = build_transformer_encoder(
+            input_len=args.num_prototypes, pos_enc=None, d_model=args.dim_out+2, 
+            ffn_dim=args.dim_out+2, num_layers=args.transition_enc_layers, 
+            norm_first=True, norm_last=False, num_heads=args.transition_enc_heads
+        )
+
+        self.grid = None 
+
+        self.branch_lambda = args.branch_lambda
+        self.spr_lambda = args.spr_lambda
+
+    def forward(self, input):
+        slotcon_loss = super().forward(x)
+        crops, coords, flags = input
+
+        t1, t1_k = self.projector_q(self.encoder_q(crops[0][:,0])), self.projector_q(self.encoder_q(crops[0][:,-1])) 
+        (t1_slots, t1_scores), (t1_k_slots, t1_k_scores) = self.grouping_q(t1), self.grouping_q(t1_k)
+        t1_scores_aligned = self.invaug(t1_scores, coords[0], flags[0])
+        
+        if self.grid is None:
+            self.grid = torch.linspace(0, 1, t1.shape[-1], device=t1.device)  # [H]
+            self.grid = self.grid.unsqueeze(0).unsqueeze(0)  # [1, 1, H]
+
+        with torch.no_grad():  # no gradient to keys
+            t2, t2_k = self.projector_k(self.encoder_k(crops[0][:,0])), self.projector_k(self.encoder_k(crops[1][:,-1]))
+            t2_k_slots, t2_k_scores = self.grouping_k(t2_k)
+        
+        t1_masks = torch.zeros_like(t1_scores_aligned).scatter_(1, t1_scores_aligned.argmax(1, keepdim=True), 1).detach()  # [N, K, H, W]
+        t1_slot_masks = (t1_masks.sum(-1).sum(-1) == 0)  # [N, K]
+        
+        x_pos = (t1_masks * self.grid.unsqueeze(-1)).mean(dim=[2,3]).unsqueeze(-1)  # [N, K, 1]
+        y_pos = (t1_masks * self.grid.unsqueeze(-2)).mean(dim=[2,3]).unsqueeze(-1)  # [N, K, 1]
+
+        t1_slots_wpos = torch.concat([t1_slots, x_pos, y_pos], -1)  # [N, K, D+2]
+        t1_k_predicted = self.transformer_transition(t1_slots_wpos, src_key_padding_mask=t1_slot_masks)
+
+        t1_k_scores_aligned, t2_k_scores_aligned = self.invaug(t1_k_scores, coords[0], flags[0]), self.invaug(t2_k_scores, coords[1], flags[1])
+        t1_k_masks = torch.zeros_like(t1_k_scores_aligned).scatter_(1, t1_k_scores_aligned.argmax(1, keepdim=True), 1).detach()  # [N, K]
+        t2_k_masks = torch.zeros_like(t2_k_scores_aligned).scatter_(1, t2_k_scores_aligned.argmax(1, keepdim=True), 1).detach()  # [N, K]
+
+        x1_pos = (t1_k_masks * self.grid.unsqueeze(-1)).mean(dim=[2,3]).unsqueeze(-1)  # [N, K, 1]
+        y1_pos = (t1_k_masks * self.grid.unsqueeze(-2)).mean(dim=[2,3]).unsqueeze(-1)  # [N, K, 1]
+
+        x2_pos = (t2_k_masks * self.grid.unsqueeze(-1)).mean(dim=[2,3]).unsqueeze(-1)  # [N, K, 1]
+        y2_pos = (t2_k_masks * self.grid.unsqueeze(-2)).mean(dim=[2,3]).unsqueeze(-1)  # [N, K, 1]
+
+        t1_k_wpos = torch.concat([t1_k_slots, x1_pos, y1_pos], -1)
+        t2_k_wpos = torch.concat([t2_k_slots, x2_pos, y2_pos], -1)
+
+        t1_k_wpos = F.normalize(t1_k_wpos.float(), p=2., dim=-1, eps=1e-3)
+        t2_k_wpos = F.normalize(t2_k_wpos.float(), p=2., dim=-1, eps=1e-3)
+        t1_k_predicted = F.normalize(t1_k_predicted.float(), p=2., dim=-1, eps=1e-3)
+
+        spr_loss_1 = F.mse_loss(t1_k_predicted, t1_k_wpos * (t1_k_masks.sum(-1).sum(-1) > 0).unsqueeze(-1).float())
+        spr_loss_2 = F.mse_loss(t1_k_predicted, t2_k_wpos * (t2_k_masks.sum(-1).sum(-1) > 0).unsqueeze(-1).float())
+
+        spr_loss = self.branch_lambda * (spr_loss_1) + (1. - self.branch_lambda) * spr_loss_2
+
+        return self.spr_lambda * spr_loss + (1. - self.spr_lambda) * slotcon_loss

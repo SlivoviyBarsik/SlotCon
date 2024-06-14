@@ -1,5 +1,6 @@
 import glob
 import numpy as np
+import torch
 
 from PIL import Image
 from torch.utils.data import Dataset
@@ -22,16 +23,24 @@ class ImageFolder(Dataset):
             self.fnames = list(glob.glob(data_dir + '/val2017/*.jpg'))
         elif dataset == 'atari':
             self.fnames = list(glob.glob(data_dir + '/*.jpg'))
+        elif dataset == 'atari_stacked':
+            self.fnames = list(glob.glob(data_dir + '/*.npy'))
         else:
             raise NotImplementedError
 
         self.fnames = np.array(self.fnames) # to avoid memory leak
         self.transform = transform
 
+        self.dataset = dataset
+
     def __len__(self):
         return len(self.fnames)
 
     def __getitem__(self, idx):
         fpath = self.fnames[idx]
+        if self.dataset == 'atari_stacked':
+            frames = np.load(fpath)  # [N_stacked, 3, H, W]
+            return self.transform(torch.from_numpy(frames))
+        
         image = Image.open(fpath).convert('RGB')
         return self.transform(image)

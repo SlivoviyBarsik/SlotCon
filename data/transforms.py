@@ -52,6 +52,11 @@ class GaussianBlur(nn.Module):
 
     def __call__(self, x):
         sigma = random.uniform(self.sigma[0], self.sigma[1])
+
+        if len(x.shape) == 4:
+            pil_imgs = [TF.pil_to_tensor(TF.to_pil_image(i).filter(ImageFilter.GaussianBlur(radius=sigma))) for i in x]
+            return torch.stack(pil_imgs)
+
         x = x.filter(ImageFilter.GaussianBlur(radius=sigma))
         return x
 
@@ -62,6 +67,10 @@ class Solarize(nn.Module):
         self.threshold = threshold
 
     def __call__(self, sample):
+        if len(sample.shape) == 4:
+            pil_imgs = [TF.pil_to_tensor(ImageOps.solarize(TF.to_pil_image(i), self.threshold)) for i in sample]
+            return torch.stack(pil_imgs)
+
         return ImageOps.solarize(sample, self.threshold)
 
 
@@ -201,8 +210,19 @@ class CustomRandomHorizontalFlip(nn.Module):
         return crops_flipped, coords_flipped, flags_flipped
 
 
+class TensorToTensor(nn.Module):
+    """
+    converts a uint8 tensor with values in [0..255] to a float32 tensor with values in [0..1]
+    """
+    def __init__(self):
+        super().__init__()
+    
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return x.float() / 255.
+
+
 class CustomDataAugmentation(object):
-    def __init__(self, size=224, min_scale=0.08):
+    def __init__(self, size=224, min_scale=0.08, expect_tensors: bool=False):
         color_jitter = transforms.Compose([
             transforms.RandomApply(
                 [transforms.ColorJitter(brightness=0.4, contrast=0.4, saturation=0.2, hue=0.1)],
@@ -211,7 +231,7 @@ class CustomDataAugmentation(object):
             transforms.RandomGrayscale(p=0.2),
         ])
         normalize = transforms.Compose([
-            transforms.ToTensor(),
+            TensorToTensor() if expect_tensors else transforms.ToTensor(),
             transforms.Normalize((0.485, 0.456, 0.406), (0.229, 0.224, 0.225)),
         ])
 

@@ -15,7 +15,7 @@ from data.datasets import ImageFolder
 from data.transforms import CustomDataAugmentation
 
 from models import resnet
-from models.slotcon import SlotCon
+from models.slotcon import SlotCon, SlotConSPR
 from utils.lars import LARS
 from utils.logger import setup_logger
 from utils.lr_scheduler import get_scheduler
@@ -27,7 +27,7 @@ def get_parser():
     parser = argparse.ArgumentParser('SlotCon')
 
     # dataset
-    parser.add_argument('--dataset', type=str, default='COCO', choices=['COCO', 'COCOplus', 'ImageNet', 'atari'], help='dataset type')
+    parser.add_argument('--dataset', type=str, default='COCO', choices=['COCO', 'COCOplus', 'ImageNet', 'atari', 'atari_stacked'], help='dataset type')
     parser.add_argument('--data-dir', type=str, default='./data', help='dataset director')
     parser.add_argument('--image-size', type=int, default=224, help='image crop size')
     parser.add_argument('--min-scale', type=float, default=0.08, help='minimum crop scale')
@@ -65,6 +65,13 @@ def get_parser():
     parser.add_argument('--seed', type=int, help='Random seed.')
     parser.add_argument('--num-workers', type=int, default=8, help='num of workers per GPU to use')
 
+    # spr
+    parser.add_argument('--slotcon', type=str, default='default', choices=['default', 'spr'])
+    parser.add_argument('--transition-enc-layers', type=int, default=3)
+    parser.add_argument('--transition-enc-heads', type=int, default=2)
+    parser.add_argument('--branch-lambda', type=float, default=0.5)
+    parser.add_argument('--spr-lambda', type=float, default=0.5)
+
     args = parser.parse_args()
     if os.environ["LOCAL_RANK"] is not None:
         args.local_rank = int(os.environ["LOCAL_RANK"])
@@ -72,7 +79,11 @@ def get_parser():
 
 def build_model(args):
     encoder = resnet.__dict__[args.arch]
-    model = SlotCon(encoder, args).cuda()
+
+    if args.slotcon == 'default':
+        model = SlotCon(encoder, args).cuda()
+    elif args.slotcon == 'spr':
+        model = SlotConSPR(encoder, args).cuda()
 
     if args.optimizer == 'sgd':
         optimizer = torch.optim.SGD(
@@ -137,7 +148,7 @@ def main(args):
         torch.cuda.manual_seed_all(args.seed)
 
     # prepare data
-    transform = CustomDataAugmentation(args.image_size, args.min_scale)
+    transform = CustomDataAugmentation(args.image_size, args.min_scale, expect_tensors=args.dataset=="atari_stacked")
     train_dataset = ImageFolder(args.dataset, args.data_dir, transform)
     train_sampler = torch.utils.data.distributed.DistributedSampler(train_dataset)
     train_loader = torch.utils.data.DataLoader(
