@@ -7,6 +7,7 @@ import torch.nn as nn
 import torchvision.transforms as transforms
 import torchvision.transforms.functional as TF
 from PIL import ImageFilter, ImageOps
+from PIL.Image import Image
 
 def _get_image_size(img):
     if TF._is_pil_image(img):
@@ -53,7 +54,7 @@ class GaussianBlur(nn.Module):
     def __call__(self, x):
         sigma = random.uniform(self.sigma[0], self.sigma[1])
 
-        if len(x.shape) == 4:
+        if not isinstance(x, Image):
             pil_imgs = [TF.pil_to_tensor(TF.to_pil_image(i).filter(ImageFilter.GaussianBlur(radius=sigma))) for i in x]
             return torch.stack(pil_imgs)
 
@@ -67,7 +68,7 @@ class Solarize(nn.Module):
         self.threshold = threshold
 
     def __call__(self, sample):
-        if len(sample.shape) == 4:
+        if not isinstance(sample, Image):
             pil_imgs = [TF.pil_to_tensor(ImageOps.solarize(TF.to_pil_image(i), self.threshold)) for i in sample]
             return torch.stack(pil_imgs)
 
