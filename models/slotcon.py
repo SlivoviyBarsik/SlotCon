@@ -289,7 +289,7 @@ class SlotConSPR(SlotCon):
         self.spr_lambda = args.spr_lambda
 
     def forward(self, input):
-        slotcon_loss = super().forward(x)
+        slotcon_loss = super().forward(input)
         crops, coords, flags = input
 
         t1, t1_k = self.projector_q(self.encoder_q(crops[0][:,0])), self.projector_q(self.encoder_q(crops[0][:,-1])) 
