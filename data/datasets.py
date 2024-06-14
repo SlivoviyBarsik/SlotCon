@@ -24,7 +24,7 @@ class ImageFolder(Dataset):
         elif dataset == 'atari':
             self.fnames = list(glob.glob(data_dir + '/*.jpg'))
         elif dataset == 'atari_stacked':
-            self.fnames = list(glob.glob(data_dir + '/*.npy'))
+            self.fnames = list(glob.glob(data_dir + '/*.npz'))
         else:
             raise NotImplementedError
 
@@ -39,7 +39,7 @@ class ImageFolder(Dataset):
     def __getitem__(self, idx):
         fpath = self.fnames[idx]
         if self.dataset == 'atari_stacked':
-            frames = np.load(fpath)  # [N_stacked, 3, H, W]
+            frames = np.load(fpath)['obs']  # [N_stacked, 3, H, W]
             return self.transform(torch.from_numpy(frames))
         
         image = Image.open(fpath).convert('RGB')
