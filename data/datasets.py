@@ -47,4 +47,4 @@ class ImageFolder(Dataset):
             return self.transform(torch.from_numpy(frames)), torch.from_numpy(actions)
         
         image = Image.open(fpath).convert('RGB')
-        return self.transform(image), None
+        return self.transform(image), torch.empty(1)
