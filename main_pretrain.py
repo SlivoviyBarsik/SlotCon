@@ -201,14 +201,14 @@ def train(train_loader, model, optimizer, scaler, scheduler, epoch, args):
     end = time.time()
     train_len = len(train_loader)
     for i, batch in enumerate(train_loader):
-        crops, coords, flags = batch
+        (crops, coords, flags), action = batch
         crops = [crop.cuda(non_blocking=True) for crop in crops]
         coords = [coord.cuda(non_blocking=True) for coord in coords]
         flags = [flag.cuda(non_blocking=True) for flag in flags]
 
         # compute output and loss
         with torch.cuda.amp.autocast(scaler is not None):
-            loss = model((crops, coords, flags))
+            loss = model((crops, coords, flags), action)
         
         optimizer.zero_grad()
         if args.fp16:

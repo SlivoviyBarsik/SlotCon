@@ -196,7 +196,7 @@ class SlotCon(nn.Module):
         labels = mask_k.cumsum(0)[idxs_q + N * torch.distributed.get_rank()] - 1
         return F.cross_entropy(logits, labels) * (2 * tau)
 
-    def forward(self, input):
+    def forward(self, input, *args):
         crops, coords, flags = input
         if len(crops[0].shape) > 4: 
             crops = [crops[0][:,0], crops[1][:,0]]  # ignore stack
@@ -283,14 +283,18 @@ class SlotConSPR(SlotCon):
             norm_first=True, norm_last=False, num_heads=args.transition_enc_heads
         )
 
+        self.action_emb = nn.Embedding(18, args.dim_out+2)
+
         self.grid = None 
 
         self.branch_lambda = args.branch_lambda
         self.spr_lambda = args.spr_lambda
 
-    def forward(self, input):
+    def forward(self, input, action):
         slotcon_loss = super().forward(input)
         crops, coords, flags = input
+
+        act_slots = self.action_emb(action.cuda())  # [N, 1, D+2]
 
         t1, t1_k = self.projector_q(self.encoder_q(crops[0][:,0])), self.projector_q(self.encoder_q(crops[0][:,-1])) 
         (t1_slots, t1_scores), (t1_k_slots, t1_k_scores) = self.grouping_q(t1), self.grouping_q(t1_k)
@@ -311,7 +315,9 @@ class SlotConSPR(SlotCon):
         y_pos = (t1_masks * self.grid.unsqueeze(-2)).mean(dim=[2,3]).unsqueeze(-1)  # [N, K, 1]
 
         t1_slots_wpos = torch.concat([t1_slots, x_pos, y_pos], -1)  # [N, K, D+2]
-        t1_k_predicted = self.transformer_transition(t1_slots_wpos, src_key_padding_mask=t1_slot_masks)
+        tot_slots = torch.concat([t1_slots_wpos, act_slots], 1)  # [N, K+1, D+2]
+        tot_slots_pred = self.transformer_transition(tot_slots, src_key_padding_mask=torch.concat([t1_slot_masks, torch.zeros(tot_slots.shape[0], 1, device='cuda')], -1))  # [N, K+1, D+2]
+        t1_k_predicted = tot_slots_pred[:,:-1]  # [N, K, D+2]
 
         t1_k_scores_aligned, t2_k_scores_aligned = self.invaug(t1_k_scores, coords[0], flags[0]), self.invaug(t2_k_scores, coords[1], flags[1])
         t1_k_masks = torch.zeros_like(t1_k_scores_aligned).scatter_(1, t1_k_scores_aligned.argmax(1, keepdim=True), 1).detach()  # [N, K]

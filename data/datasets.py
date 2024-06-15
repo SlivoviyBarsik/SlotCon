@@ -39,8 +39,12 @@ class ImageFolder(Dataset):
     def __getitem__(self, idx):
         fpath = self.fnames[idx]
         if self.dataset == 'atari_stacked':
-            frames = np.load(fpath)['obs']  # [N_stacked, 3, H, W]
-            return self.transform(torch.from_numpy(frames))
+            data = np.load(fpath)
+
+            frames = data['obs']  # [N_stacked, 3, H, W]
+            actions = data['action']  # [1]
+
+            return self.transform(torch.from_numpy(frames)), torch.from_numpy(actions)
         
         image = Image.open(fpath).convert('RGB')
-        return self.transform(image)
+        return self.transform(image), None
