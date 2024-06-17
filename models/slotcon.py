@@ -253,7 +253,15 @@ class SlotConEval(nn.Module):
         self.dim_hidden = args.dim_hidden
         self.dim_out = args.dim_out
 
-        self.num_channels = 512 if args.arch in ('resnet_small', 'resnet18', 'resnet34') else 2048
+        if args.arch in ('resnet_small', 'resnet18', 'resnet34'):
+            self.num_channels = 512  
+        elif args.arch == 'spr_cnn':
+            self.num_channels = 64
+        elif args.arch == 'resnet3l':
+            self.num_channels = 256 
+        else:
+            self.num_channels = 2048
+
         self.encoder_k = encoder(head_type='early_return')
         for param_k in self.encoder_k.parameters():
             param_k.requires_grad = False  # not update by gradient
@@ -311,8 +319,8 @@ class SlotConSPR(SlotCon):
         t1_masks = torch.zeros_like(t1_scores_aligned).scatter_(1, t1_scores_aligned.argmax(1, keepdim=True), 1).detach()  # [N, K, H, W]
         t1_slot_masks = (t1_masks.sum(-1).sum(-1) == 0)  # [N, K]
         
-        x_pos = (t1_masks * self.grid.unsqueeze(-1)).mean(dim=[2,3]).unsqueeze(-1)  # [N, K, 1]
-        y_pos = (t1_masks * self.grid.unsqueeze(-2)).mean(dim=[2,3]).unsqueeze(-1)  # [N, K, 1]
+        x_pos = ((t1_masks * self.grid.unsqueeze(-1)).sum(dim=[2,3]) / (t1_masks.sum(dim=[2,3]) + 1e-6)).unsqueeze(-1)  # [N, K, 1]
+        y_pos = ((t1_masks * self.grid.unsqueeze(-2)).sum(dim=[2,3]) / (t1_masks.sum(dim=[2,3]) + 1e-6)).unsqueeze(-1)  # [N, K, 1]
 
         t1_slots_wpos = torch.concat([t1_slots, x_pos, y_pos], -1)  # [N, K, D+2]
         tot_slots = torch.concat([t1_slots_wpos, act_slots], 1)  # [N, K+1, D+2]
@@ -323,11 +331,11 @@ class SlotConSPR(SlotCon):
         t1_k_masks = torch.zeros_like(t1_k_scores_aligned).scatter_(1, t1_k_scores_aligned.argmax(1, keepdim=True), 1).detach()  # [N, K]
         t2_k_masks = torch.zeros_like(t2_k_scores_aligned).scatter_(1, t2_k_scores_aligned.argmax(1, keepdim=True), 1).detach()  # [N, K]
 
-        x1_pos = (t1_k_masks * self.grid.unsqueeze(-1)).mean(dim=[2,3]).unsqueeze(-1)  # [N, K, 1]
-        y1_pos = (t1_k_masks * self.grid.unsqueeze(-2)).mean(dim=[2,3]).unsqueeze(-1)  # [N, K, 1]
+        x1_pos = ((t1_k_masks * self.grid.unsqueeze(-1)).sum(dim=[2,3]) / (t1_k_masks.sum(dim=[2,3]) + 1e-6)).unsqueeze(-1)  # [N, K, 1]
+        y1_pos = ((t1_k_masks * self.grid.unsqueeze(-2)).sum(dim=[2,3]) / (t1_k_masks.sum(dim=[2,3]) + 1e-6)).unsqueeze(-1)  # [N, K, 1]
 
-        x2_pos = (t2_k_masks * self.grid.unsqueeze(-1)).mean(dim=[2,3]).unsqueeze(-1)  # [N, K, 1]
-        y2_pos = (t2_k_masks * self.grid.unsqueeze(-2)).mean(dim=[2,3]).unsqueeze(-1)  # [N, K, 1]
+        x2_pos = ((t2_k_masks * self.grid.unsqueeze(-1)).sum(dim=[2,3]) / (t2_k_masks.sum(dim=[2,3]) + 1e-6)).unsqueeze(-1)  # [N, K, 1]
+        y2_pos = ((t2_k_masks * self.grid.unsqueeze(-2)).sum(dim=[2,3]) / (t2_k_masks.sum(dim=[2,3]) + 1e-6)).unsqueeze(-1)  # [N, K, 1]
 
         t1_k_wpos = torch.concat([t1_k_slots, x1_pos, y1_pos], -1)
         t2_k_wpos = torch.concat([t2_k_slots, x2_pos, y2_pos], -1)
