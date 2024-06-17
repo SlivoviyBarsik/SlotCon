@@ -196,7 +196,7 @@ class SlotCon(nn.Module):
         labels = mask_k.cumsum(0)[idxs_q + N * torch.distributed.get_rank()] - 1
         return F.cross_entropy(logits, labels) * (2 * tau)
 
-    def forward(self, input, *args):
+    def forward(self, input, return_q1_aligned=False, *args):
         crops, coords, flags = input
         if len(crops[0].shape) > 4: 
             crops = [crops[0][:,0], crops[1][:,0]]  # ignore stack
@@ -219,6 +219,8 @@ class SlotCon(nn.Module):
         loss += (1. - self.group_loss_weight) * self.ctr_loss_filtered(q1, k2, score_q1, score_k2) \
               + (1. - self.group_loss_weight) * self.ctr_loss_filtered(q2, k1, score_q2, score_k1)
         
+        if return_q1_aligned:
+            return loss, x1, q1, q1_aligned
         return loss
     
     @torch.no_grad()
@@ -299,22 +301,18 @@ class SlotConSPR(SlotCon):
         self.spr_lambda = args.spr_lambda
 
     def forward(self, input, action):
-        slotcon_loss = super().forward(input)
+        slotcon_loss, t1, t1_slots, t1_scores_aligned = super().forward(input, True)
         crops, coords, flags = input
 
         act_slots = self.action_emb(action.cuda())  # [N, 1, D+2]
-
-        t1, t1_k = self.projector_q(self.encoder_q(crops[0][:,0])), self.projector_q(self.encoder_q(crops[0][:,-1])) 
-        (t1_slots, t1_scores), (t1_k_slots, t1_k_scores) = self.grouping_q(t1), self.grouping_q(t1_k)
-        t1_scores_aligned = self.invaug(t1_scores, coords[0], flags[0])
         
         if self.grid is None:
             self.grid = torch.linspace(0, 1, t1.shape[-1], device=t1.device)  # [H]
             self.grid = self.grid.unsqueeze(0).unsqueeze(0)  # [1, 1, H]
 
         with torch.no_grad():  # no gradient to keys
-            t2, t2_k = self.projector_k(self.encoder_k(crops[0][:,0])), self.projector_k(self.encoder_k(crops[1][:,-1]))
-            t2_k_slots, t2_k_scores = self.grouping_k(t2_k)
+            t1_k, t2_k = self.projector_q(self.encoder_q(crops[0][:,-1])), self.projector_k(self.encoder_k(crops[1][:,-1]))
+            (t1_k_slots, t1_k_scores), (t2_k_slots, t2_k_scores) = self.grouping_q(t1_k), self.grouping_k(t2_k)
         
         t1_masks = torch.zeros_like(t1_scores_aligned).scatter_(1, t1_scores_aligned.argmax(1, keepdim=True), 1).detach()  # [N, K, H, W]
         t1_slot_masks = (t1_masks.sum(-1).sum(-1) == 0)  # [N, K]
