@@ -196,7 +196,7 @@ class SlotCon(nn.Module):
         labels = mask_k.cumsum(0)[idxs_q + N * torch.distributed.get_rank()] - 1
         return F.cross_entropy(logits, labels) * (2 * tau)
 
-    def forward(self, input, return_q1_aligned=False, *args):
+    def forward(self, input, action=None, return_q1_aligned=False, *args):
         crops, coords, flags = input
         if len(crops[0].shape) > 4: 
             crops = [crops[0][:,0], crops[1][:,0]]  # ignore stack
