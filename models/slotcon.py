@@ -301,7 +301,7 @@ class SlotConSPR(SlotCon):
         self.spr_lambda = args.spr_lambda
 
     def forward(self, input, action):
-        slotcon_loss, t1, t1_slots, t1_scores_aligned = super().forward(input, True)
+        slotcon_loss, t1, t1_slots, t1_scores_aligned = super().forward(input, return_q1_aligned=True)
         crops, coords, flags = input
 
         act_slots = self.action_emb(action.cuda())  # [N, 1, D+2]
