@@ -27,7 +27,7 @@ class ImageFolder(Dataset):
         else:
             raise NotImplementedError
 
-        self.fnames = np.array(self.fnames) # to avoid memory leak
+        self.fnames = np.array(sorted(self.fnames)) # to avoid memory leak
         self.transform = transform
 
         self.dataset = dataset
