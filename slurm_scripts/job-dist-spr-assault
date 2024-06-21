@@ -1,6 +1,6 @@
 #!/bin/bash
 #SBATCH -N 1            # number of nodes on which to run
-#SBATCH --gres=gpu:2        # number of gpus
+#SBATCH --gres=gpu:rtx6000:2        # number of gpus
 #SBATCH --ntasks=8
 #SBATCH --tasks-per-node=8
 #SBATCH --cpus-per-task=4
@@ -9,7 +9,7 @@
 #SBATCH --mem=64GB         # minimum amount of real memory
 #SBATCH --job-name=dist_spr_slotcon
 #SBATCH --open-mode=append
-#SBATCH --qos=scavenger
+#SBATCH --qos=m2
 #SBATCH --signal=B:USR1@30
 
 arch=$1
