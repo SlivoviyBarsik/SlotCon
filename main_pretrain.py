@@ -30,7 +30,7 @@ def get_parser():
     parser.add_argument('--dataset', type=str, default='COCO', choices=['COCO', 'COCOplus', 'ImageNet', 'atari', 'atari_stacked'], help='dataset type')
     parser.add_argument('--data-dir', type=str, default='./data', help='dataset director')
     parser.add_argument('--image-size', type=int, default=224, help='image crop size')
-    parser.add_argument('--min-scale', type=float, default=0.08, help='minimum crop scale')
+    parser.add_argument('--min-scale', type=float, default=0.53, help='minimum crop scale')  # min pixel patch is 80x80 from a 128x128 image, which for most games will most likely not be empty
    
     # model
     parser.add_argument('--arch', type=str, default='resnet50', choices=model_names, help='backbone architecture')
