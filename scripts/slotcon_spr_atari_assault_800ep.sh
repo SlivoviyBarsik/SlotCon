@@ -38,8 +38,9 @@ CUDA_VISIBLE_DEVICES=0 torchrun --nproc_per_node=1 \
     --fp16 \
     \
     --print-freq 10 \
-    --save-freq 50 \
+    --save-freq 10 \
     --auto-resume \
     --num-workers 8\
     \
-    --slotcon spr
+    --slotcon spr \
+    --spr-lambda 0.33

@@ -5,7 +5,7 @@
 #SBATCH --tasks-per-node=8
 #SBATCH --cpus-per-task=4
 #SBATCH --exclude="gpu138"
-#SBATCH --time=5:00:00      # time limit
+#SBATCH --time=6:10:00      # time limit
 #SBATCH --mem=64GB         # minimum amount of real memory
 #SBATCH --job-name=slotcon_spr
 #SBATCH --open-mode=append
