@@ -296,8 +296,6 @@ class SlotConSPR(SlotCon):
         self.action_emb = nn.Embedding(18, args.dim_out+2)
 
         self.grid = None 
-
-        self.branch_lambda = args.branch_lambda
         self.spr_lambda = args.spr_lambda
 
     def forward(self, input, action):
@@ -311,8 +309,8 @@ class SlotConSPR(SlotCon):
             self.grid = self.grid.unsqueeze(0).unsqueeze(0)  # [1, 1, H]
 
         with torch.no_grad():  # no gradient to keys
-            t1_k, t2_k = self.projector_q(self.encoder_q(crops[0][:,-1])), self.projector_k(self.encoder_k(crops[1][:,-1]))
-            (t1_k_slots, t1_k_scores), (t2_k_slots, t2_k_scores) = self.grouping_q(t1_k), self.grouping_k(t2_k)
+            t2_k = self.projector_k(self.encoder_k(crops[1][:,-1]))
+            (t2_k_slots, t2_k_scores) = self.grouping_k(t2_k)
         
         t1_masks = torch.zeros_like(t1_scores_aligned).scatter_(1, t1_scores_aligned.argmax(1, keepdim=True), 1).detach()  # [N, K, H, W]
         t1_slot_masks = (t1_masks.sum(-1).sum(-1) == 0)  # [N, K]
@@ -325,26 +323,17 @@ class SlotConSPR(SlotCon):
         tot_slots_pred = self.transformer_transition(tot_slots, src_key_padding_mask=torch.concat([t1_slot_masks, torch.zeros(tot_slots.shape[0], 1, device='cuda')], -1))  # [N, K+1, D+2]
         t1_k_predicted = tot_slots_pred[:,:-1]  # [N, K, D+2]
 
-        t1_k_scores_aligned, t2_k_scores_aligned = self.invaug(t1_k_scores, coords[0], flags[0]), self.invaug(t2_k_scores, coords[1], flags[1])
-        t1_k_masks = torch.zeros_like(t1_k_scores_aligned).scatter_(1, t1_k_scores_aligned.argmax(1, keepdim=True), 1).detach()  # [N, K]
+        t2_k_scores_aligned = self.invaug(t2_k_scores, coords[1], flags[1])
         t2_k_masks = torch.zeros_like(t2_k_scores_aligned).scatter_(1, t2_k_scores_aligned.argmax(1, keepdim=True), 1).detach()  # [N, K]
-
-        x1_pos = ((t1_k_masks * self.grid.unsqueeze(-1)).sum(dim=[2,3]) / (t1_k_masks.sum(dim=[2,3]) + 1e-6)).unsqueeze(-1)  # [N, K, 1]
-        y1_pos = ((t1_k_masks * self.grid.unsqueeze(-2)).sum(dim=[2,3]) / (t1_k_masks.sum(dim=[2,3]) + 1e-6)).unsqueeze(-1)  # [N, K, 1]
 
         x2_pos = ((t2_k_masks * self.grid.unsqueeze(-1)).sum(dim=[2,3]) / (t2_k_masks.sum(dim=[2,3]) + 1e-6)).unsqueeze(-1)  # [N, K, 1]
         y2_pos = ((t2_k_masks * self.grid.unsqueeze(-2)).sum(dim=[2,3]) / (t2_k_masks.sum(dim=[2,3]) + 1e-6)).unsqueeze(-1)  # [N, K, 1]
 
-        t1_k_wpos = torch.concat([t1_k_slots, x1_pos, y1_pos], -1)
         t2_k_wpos = torch.concat([t2_k_slots, x2_pos, y2_pos], -1)
 
-        t1_k_wpos = F.normalize(t1_k_wpos.float(), p=2., dim=-1, eps=1e-3)
         t2_k_wpos = F.normalize(t2_k_wpos.float(), p=2., dim=-1, eps=1e-3)
         t1_k_predicted = F.normalize(t1_k_predicted.float(), p=2., dim=-1, eps=1e-3)
 
-        spr_loss_1 = F.mse_loss(t1_k_predicted, t1_k_wpos * (t1_k_masks.sum(-1).sum(-1) > 0).unsqueeze(-1).float())
-        spr_loss_2 = F.mse_loss(t1_k_predicted, t2_k_wpos * (t2_k_masks.sum(-1).sum(-1) > 0).unsqueeze(-1).float())
-
-        spr_loss = self.branch_lambda * (spr_loss_1) + (1. - self.branch_lambda) * spr_loss_2
+        spr_loss = F.mse_loss(t1_k_predicted, t2_k_wpos * (t2_k_masks.sum(-1).sum(-1) > 0).unsqueeze(-1).float())
 
         return self.spr_lambda * spr_loss + (1. - self.spr_lambda) * slotcon_loss
