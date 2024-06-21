@@ -69,8 +69,8 @@ def get_parser():
     parser.add_argument('--slotcon', type=str, default='default', choices=['default', 'spr'])
     parser.add_argument('--transition-enc-layers', type=int, default=3)
     parser.add_argument('--transition-enc-heads', type=int, default=2)
-    parser.add_argument('--branch-lambda', type=float, default=0.5)
     parser.add_argument('--spr-lambda', type=float, default=0.5)
+    parser.add_argument('--spr-skip', type=int, default=0)
 
     args = parser.parse_args()
     if os.environ["LOCAL_RANK"] is not None:
@@ -148,8 +148,8 @@ def main(args):
         torch.cuda.manual_seed_all(args.seed)
 
     # prepare data
-    transform = CustomDataAugmentation(args.image_size, args.min_scale, expect_tensors=args.dataset=="atari_stacked")
-    train_dataset = ImageFolder(args.dataset, args.data_dir, transform)
+    transform = CustomDataAugmentation(args.image_size, args.min_scale, expect_tensors=args.dataset=="atari")
+    train_dataset = ImageFolder(args.dataset, args.data_dir, transform, args.spr_skip)
     train_sampler = torch.utils.data.distributed.DistributedSampler(train_dataset)
     train_loader = torch.utils.data.DataLoader(
         train_dataset, batch_size=args.batch_size, shuffle=(train_sampler is None), 

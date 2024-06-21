@@ -7,7 +7,7 @@ arch=$1
 dim_out=$2
 dim_hidden=$3
 
-data_dir="../atari_stacked/assault_128"
+data_dir="../atari_ds/assault_128"
 output_dir="./output/slotcon_spr_atari_assault_${arch}_${dim_out}_${dim_hidden}_800ep"
 
 echo ${output_dir}
@@ -16,7 +16,7 @@ source venv/bin/activate
 
 CUDA_VISIBLE_DEVICES=0 torchrun --nproc_per_node=1 \
     main_pretrain.py \
-    --dataset atari_stacked \
+    --dataset atari \
     --data-dir ${data_dir} \
     --output-dir ${output_dir} \
     \
@@ -43,4 +43,5 @@ CUDA_VISIBLE_DEVICES=0 torchrun --nproc_per_node=1 \
     --num-workers 8\
     \
     --slotcon spr \
+    --spr-skip 1 \
     --spr-lambda 0.33

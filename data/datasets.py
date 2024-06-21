@@ -10,7 +10,8 @@ class ImageFolder(Dataset):
         self,
         dataset,
         data_dir,
-        transform
+        transform,
+        spr_skip=0
     ):
         super(ImageFolder, self).__init__()
         if dataset == 'ImageNet':
@@ -22,8 +23,6 @@ class ImageFolder(Dataset):
         elif dataset == 'COCOval':
             self.fnames = list(glob.glob(data_dir + '/val2017/*.jpg'))
         elif dataset == 'atari':
-            self.fnames = list(glob.glob(data_dir + '/*.jpg'))
-        elif dataset == 'atari_stacked':
             self.fnames = list(glob.glob(data_dir + '/*.npz'))
         else:
             raise NotImplementedError
@@ -32,17 +31,22 @@ class ImageFolder(Dataset):
         self.transform = transform
 
         self.dataset = dataset
+        self.spr_skip = spr_skip
 
     def __len__(self):
         return len(self.fnames)
 
     def __getitem__(self, idx):
         fpath = self.fnames[idx]
-        if self.dataset == 'atari_stacked':
-            data = np.load(fpath)
+        if self.dataset == 'atari':
+            data = [np.load(fn) for fn in self.fnames[idx:min(idx + self.spr_skip + 1, len(self.fnames))]]
+            dones = np.array([d['done'] for d in data])
 
-            frames = data['obs']  # [N_stacked, 3, H, W]
-            actions = data['action']  # [1]
+            frame_1 = data[0]['obs']  # [3, H, W]
+            frame_k = data[-1]['obs'] if len(data) == self.spr_skip + 1 and dones.cumsum()[-1] == 0 else np.zeros_like(frame_1)
+
+            actions = data[0]['action']  # [1]
+            frames = np.stack([frame_1, frame_k])  # [2, 3, H, W]
 
             return self.transform(torch.from_numpy(frames)), torch.from_numpy(actions)
         
