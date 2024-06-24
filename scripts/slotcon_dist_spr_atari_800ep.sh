@@ -18,7 +18,7 @@ source venv/bin/activate
 
 CUDA_VISIBLE_DEVICES=0,1 torchrun --nproc_per_node=2 \
     main_pretrain.py \
-    --dataset atari_stacked \
+    --dataset atari \
     --data-dir ${data_dir} \
     --output-dir ${output_dir} \
     \
