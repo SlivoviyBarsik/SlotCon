@@ -6,9 +6,10 @@ set -x
 arch=$1
 dim_out=$2
 dim_hidden=$3
+game=$4
 
-data_dir="../atari_ds/assault_128"
-output_dir="./output/slotcon_atari_assault_${arch}_${dim_out}_${dim_hidden}_800ep"
+data_dir="../atari_ds/${game}_128"
+output_dir="./output/slotcon_atari_${game}_${arch}_${dim_out}_${dim_hidden}_800ep"
 
 echo ${output_dir}
 
