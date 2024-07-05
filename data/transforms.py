@@ -1,13 +1,16 @@
 import math
 import random
+from typing import List, Tuple
 import warnings
 
 import torch
 import torch.nn as nn
 import torchvision.transforms as transforms
 import torchvision.transforms.functional as TF
-from PIL import ImageFilter, ImageOps
-from PIL.Image import Image
+
+from kornia.filters.gaussian import GaussianBlur2d
+from kornia.augmentation import RandomSolarize, ColorJitter
+
 
 def _get_image_size(img):
     if TF._is_pil_image(img):
@@ -44,36 +47,56 @@ def _clip_coords(coords, params):
     return [coord_q_clipped, coord_k_clipped]
 
 
-class GaussianBlur(nn.Module):
-    """Gaussian blur augmentation in SimCLR https://arxiv.org/abs/2002.05709"""
+class SPRTwoCrop(object):
+    def __init__(self, size=128, padding=4):
+        if isinstance(size, (tuple, list)):
+            self.size = size 
+        else:
+            self.size = (size, size)
 
-    def __init__(self, sigma=[.1, 2.]):
-        super().__init__()
-        self.sigma = sigma
+        self.pad = nn.ReplicationPad2d(padding)
+        self.pad_size = padding
 
-    def __call__(self, x):
-        sigma = random.uniform(self.sigma[0], self.sigma[1])
+    def __call__(self, img: torch.Tensor) -> Tuple[Tuple[torch.Tensor, torch.Tensor], Tuple[List, List]]:
+        """
+        img: torch.Tensor, [N, C, H, W]
+        """
+        assert img.shape[-2:] == self.size, f'Expected image of size {self.size}, got shape {img.shape[-2:]} instead'
 
-        if not isinstance(x, Image):
-            pil_imgs = [TF.pil_to_tensor(TF.to_pil_image(i).filter(ImageFilter.GaussianBlur(radius=sigma))) for i in x]
-            return torch.stack(pil_imgs)
+        x0, x1 = torch.randint(0, 2*self.pad_size, img.shape[:-3]), torch.randint(0, 2*self.pad_size, img.shape[:-3])
+        y0, y1 = torch.randint(0, 2*self.pad_size, img.shape[:-3]), torch.randint(0, 2*self.pad_size, img.shape[:-3])
 
-        x = x.filter(ImageFilter.GaussianBlur(radius=sigma))
-        return x
+        padded_img = self.pad(img)  # [N, C, H+2*padding, W+2*padding]
+        
+        index0 = torch.tile(x0.unsqueeze(1) + torch.arange(0, self.size[1]).unsqueeze(0), (1, self.size[0])) + \
+            torch.repeat_interleave(y0.unsqueeze(1) + torch.arange(0, self.size[0]), self.size[1], 1) * padded_img.shape[-1]
+        index0 = index0.unsqueeze(1).repeat((1,img.shape[1],1))  # [N, C, H, W]
 
+        index1 = torch.tile(x1.unsqueeze(1) + torch.arange(0, self.size[1]).unsqueeze(0), (1, self.size[0])) + \
+            torch.repeat_interleave(y1.unsqueeze(1) + torch.arange(0, self.size[0]), self.size[1], 1) * padded_img.shape[-1]
+        index1 = index1.unsqueeze(1).repeat((1,img.shape[1],1))  # [N, C, H, W]
 
-class Solarize(nn.Module):
-    def __init__(self, threshold=128):
-        super().__init__()
-        self.threshold = threshold
+        crop0 = torch.gather(padded_img.flatten(-2,-1), 2, index0.to(padded_img.device))
+        crop0 = crop0.reshape(img.shape)
 
-    def __call__(self, sample):
-        if not isinstance(sample, Image):
-            pil_imgs = [TF.pil_to_tensor(ImageOps.solarize(TF.to_pil_image(i), self.threshold)) for i in sample]
-            return torch.stack(pil_imgs)
+        crop1 = torch.gather(padded_img.flatten(-2,-1), 2, index1.to(padded_img.device))
+        crop1 = crop1.reshape(img.shape)
 
-        return ImageOps.solarize(sample, self.threshold)
+        # TODO: check that reshapes yield correct results
 
+        x1_n = torch.stack([x0, x1]).max(0).values 
+        y1_n = torch.stack([y0, y1]).max(0).values
+
+        x2_n = torch.stack([x0, x1]).min(0).values + self.size[1]
+        y2_n = torch.stack([y0, y1]).min(0).values + self.size[0]
+
+        coords0 = torch.stack([(x1_n - x0).float() / self.size[0], (y1_n - y0).float() / self.size[1],
+                   (x2_n - x0).float() / self.size[0], (y2_n - y0).float() / self.size[1]]).to(padded_img.device)
+        
+        coords1 = torch.stack([(x1_n - x1).float() / self.size[0], (y1_n - y1).float() / self.size[1],
+                   (x2_n - x1).float() / self.size[0], (y2_n - y1).float() / self.size[1]]).to(padded_img.device)
+        
+        return [crop0, crop1], [coords0, coords1]
 
 class CustomTwoCrop(object):
     def __init__(self, size=224, scale=(0.2, 1.0), ratio=(3. / 4., 4. / 3.), interpolation=TF.InterpolationMode.BILINEAR,
@@ -209,6 +232,36 @@ class CustomRandomHorizontalFlip(nn.Module):
             flags_flipped.append(flag_flipped)
 
         return crops_flipped, coords_flipped, flags_flipped
+    
+class CustomBatchRandomHorFlip(nn.Module):
+    def __init__(self, p=0.5):
+        super().__init__()
+        self.p = p
+    
+    def __call__(self, crops, coords):
+        crops_flipped, coords_flipped, flags = [], [], []
+        for crop, coord in zip(crops, coords):
+            crop_flipped = torch.zeros_like(crop)
+            coord_flipped = torch.zeros_like(coord)
+
+            flag = torch.rand(crop.shape[0]) <= self.p
+            mask_to_flip = (flag)[...,None,None,None].to(crop.device)
+            
+            fl_crop = TF.hflip(crop)
+
+            crop_flipped = fl_crop * mask_to_flip + (~mask_to_flip) * crop  # TODO: check if is correct
+            mask_to_flip = mask_to_flip.flatten(0,-1)
+            
+            coord_flipped[0] = (1. - coord[2]) * mask_to_flip + (~mask_to_flip) * coord[0]
+            coord_flipped[1] = coord[1]
+            coord_flipped[2] = (1. - coord[0]) * mask_to_flip + (~mask_to_flip) * coord[2]
+            coord_flipped[3] = coord[3]
+
+            crops_flipped.append(crop_flipped)
+            coords_flipped.append(coord_flipped)
+            flags.append(flag)
+
+        return crops_flipped, coords_flipped, flags
 
 
 class TensorToTensor(nn.Module):
@@ -220,14 +273,73 @@ class TensorToTensor(nn.Module):
     
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         return x.float() / 255.
+    
+class TensorToFloat(nn.Module):
+    """
+    converts a uint8 tensor with values in [0..255] to a float32 tensor with values in [0..1]
+    """
+    def __init__(self):
+        super().__init__()
+    
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return x.float()
+    
+
+class CustomColorJitter(nn.Module):
+    def __init__(self, *args, **kwargs):
+        super().__init__()
+
+        self.jitter = ColorJitter(*args, **kwargs)
+
+    def __call__(self, x: torch.Tensor) -> torch.Tensor:
+        input = x.float() / 255. if x.dtype == torch.uint8 else x
+        return (self.jitter(input) * 255.).to(torch.uint8)
+    
+
+class CustomGaussianBlur(nn.Module):
+    def __init__(self, *args, **kwargs):
+        super().__init__()
+
+        self.blur = GaussianBlur2d(*args, **kwargs)
+
+    def __call__(self, x: torch.Tensor) -> torch.Tensor:
+        input = x.float() / 255. if x.dtype == torch.uint8 else x
+        return (self.blur(input) * 255.).to(torch.uint8)
+    
+
+class CustomSolarize(nn.Module):
+    def __init__(self, *args, **kwargs):
+        super().__init__()
+
+        self.solarize = RandomSolarize(*args, **kwargs)
+
+    def __call__(self, x: torch.Tensor) -> torch.Tensor:
+        input = x.float() / 255. if x.dtype == torch.uint8 else x
+        return (self.solarize(input) * 255.).to(torch.uint8)
+
+
+class CustomRandomApply(nn.Module):
+    def __init__(self, transform: nn.Module, prob: float) -> None:
+        super().__init__()
+
+        self.transform = transform
+        self.prob = prob 
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        input = x.flatten(0,-4)  # [P, 3, H, W]
+        mask = torch.rand(input.shape[0]).to(input.device)[..., None, None, None] <= self.prob  # [P, 1, 1, 1]
+        output = self.transform(input) * mask + (~mask) * input
+        output = output.reshape([*x.shape[:-3], *output.shape[1:]])
+
+        return output
 
 
 class CustomDataAugmentation(object):
     def __init__(self, size=224, min_scale=0.08, expect_tensors: bool=False):
         color_jitter = transforms.Compose([
-            transforms.RandomApply(
-                [transforms.ColorJitter(brightness=0.4, contrast=0.4, saturation=0.2, hue=0.1)],
-                p=0.8
+            CustomRandomApply(
+                CustomColorJitter(brightness=0.4, contrast=0.4, saturation=0.2, hue=0.1),
+                prob=0.8
             ),
             transforms.RandomGrayscale(p=0.2),
         ])
@@ -236,20 +348,21 @@ class CustomDataAugmentation(object):
             transforms.Normalize((0.485, 0.456, 0.406), (0.229, 0.224, 0.225)),
         ])
 
-        self.two_crop = CustomTwoCrop(size, (min_scale, 1), interpolation=TF.InterpolationMode.BICUBIC)
-        self.hflip = CustomRandomHorizontalFlip(p=0.5)
+        # self.two_crop = CustomTwoCrop(size, (min_scale, 1), interpolation=TF.InterpolationMode.BICUBIC)
+        self.two_crop = SPRTwoCrop(size, padding=4)
+        self.hflip = CustomBatchRandomHorFlip(p=0.5)
 
         # first global crop
         self.global_transfo1 = transforms.Compose([
             color_jitter,
-            transforms.RandomApply([GaussianBlur([.1, 2.])], p=1.),
+            CustomRandomApply(CustomGaussianBlur(5, (.1, 2.)), prob=1.),
             normalize,
         ])
         # second global crop
         self.global_transfo2 = transforms.Compose([
             color_jitter,
-            transforms.RandomApply([GaussianBlur([.1, 2.])], p=0.1),
-            transforms.RandomApply([Solarize()], p=0.2),
+            CustomRandomApply(CustomGaussianBlur(5, (.1, 2.)), prob=0.1),
+            CustomSolarize(p=0.2),
             normalize,
         ])
 
@@ -260,3 +373,19 @@ class CustomDataAugmentation(object):
         crops_transformed.append(self.global_transfo1(crops[0]))
         crops_transformed.append(self.global_transfo2(crops[1]))
         return crops_transformed, coords, flags
+    
+class DummyAugmentation(object):
+    def __init__(self):
+        self.normalize = transforms.Compose([
+            TensorToTensor(),
+            transforms.Normalize((0.485, 0.456, 0.406), (0.229, 0.224, 0.225)),
+        ])
+
+    def __call__(self, image):
+        image = self.normalize(image)
+        crops = [image, image]
+        coords = torch.concat([torch.zeros([2, image.shape[0]]), torch.ones([2, image.shape[0]])], 0)
+        coords = [coords, coords]
+        flags = [torch.zeros(image.shape[0]), torch.zeros(image.shape[0])]
+
+        return crops, coords, flags

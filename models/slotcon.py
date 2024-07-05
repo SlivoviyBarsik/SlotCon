@@ -200,6 +200,8 @@ class SlotCon(nn.Module):
         crops, coords, flags = input
         if len(crops[0].shape) > 4: 
             crops = [crops[0][:,0], crops[1][:,0]]  # ignore stack
+            coords = [coords[0][...,0], coords[1][...,0]]
+            flags = [f[...,0] for f in flags]
         x1, x2 = self.projector_q(self.encoder_q(crops[0])), self.projector_q(self.encoder_q(crops[1]))
         with torch.no_grad():  # no gradient to keys
             self._momentum_update_key_encoder()  # update the key encoder
@@ -296,7 +298,29 @@ class SlotConSPR(SlotCon):
         self.action_emb = nn.Embedding(18, args.dim_out+2)
 
         self.grid = None 
-        self.spr_lambda = args.spr_lambda
+        self.spr_weight = args.spr_lambda
+
+        if args.spr_loss == 'mse':
+            self.spr_loss = self.spr_loss_mse
+        elif args.spr_loss == 'contrastive':
+            self.spr_loss = self.spr_loss_contrastive
+        else:
+            raise NotImplementedError
+
+    def spr_loss_mse(self, t1_k_predicted: torch.Tensor, t2_k_wpos: torch.Tensor, 
+                     t2_k_masks: torch.Tensor) -> torch.Tensor:
+        
+
+        spr_loss = F.mse_loss(t1_k_predicted, t2_k_wpos * (t2_k_masks.sum(-1).sum(-1) > 0).unsqueeze(-1).float())
+        return spr_loss 
+    
+    def spr_loss_contrastive(self, t1_k_predicted: torch.Tensor, t2_k_wpos: torch.Tensor, 
+                             t2_k_masks: torch.Tensor) -> torch.Tensor:
+        
+        similarity = torch.exp(torch.einsum("nkd,nld->nkl", [t1_k_predicted, t2_k_wpos])) * t2_k_masks.unsqueeze(1)  # [N, K, K]
+        spr_loss = torch.log((similarity * torch.eye(similarity.shape[1], device=similarity.device).unsqueeze(0)).sum(-1) / (similarity.sum(-1) + 1e-6) + 1e-6)  # [N, K]
+    
+        return -spr_loss.mean()
 
     def forward(self, input, action):
         slotcon_loss, t1, t1_slots, t1_scores_aligned = super().forward(input, return_q1_aligned=True)
@@ -313,7 +337,7 @@ class SlotConSPR(SlotCon):
             (t2_k_slots, t2_k_scores) = self.grouping_k(t2_k)
         
         t1_masks = torch.zeros_like(t1_scores_aligned).scatter_(1, t1_scores_aligned.argmax(1, keepdim=True), 1).detach()  # [N, K, H, W]
-        t1_slot_masks = (t1_masks.sum(-1).sum(-1) == 0)  # [N, K]
+        t1_slot_masks = t1_masks.sum((-2,-1)) == 0  # [N, K]
         
         x_pos = ((t1_masks * self.grid.unsqueeze(-1)).sum(dim=[2,3]) / (t1_masks.sum(dim=[2,3]) + 1e-6)).unsqueeze(-1)  # [N, K, 1]
         y_pos = ((t1_masks * self.grid.unsqueeze(-2)).sum(dim=[2,3]) / (t1_masks.sum(dim=[2,3]) + 1e-6)).unsqueeze(-1)  # [N, K, 1]
@@ -323,8 +347,9 @@ class SlotConSPR(SlotCon):
         tot_slots_pred = self.transformer_transition(tot_slots, src_key_padding_mask=torch.concat([t1_slot_masks, torch.zeros(tot_slots.shape[0], 1, device='cuda')], -1))  # [N, K+1, D+2]
         t1_k_predicted = tot_slots_pred[:,:-1]  # [N, K, D+2]
 
-        t2_k_scores_aligned = self.invaug(t2_k_scores, coords[1], flags[1])
-        t2_k_masks = torch.zeros_like(t2_k_scores_aligned).scatter_(1, t2_k_scores_aligned.argmax(1, keepdim=True), 1).detach()  # [N, K]
+        t2_k_scores_aligned = self.invaug(t2_k_scores, coords[1][...,-1], flags[1][...,-1])
+        t2_k_masks = torch.zeros_like(t2_k_scores_aligned).scatter_(1, t2_k_scores_aligned.argmax(1, keepdim=True), 1).detach()  # [N, K, H, W] 
+        t2_k_slot_masks = t2_k_masks.sum((-2,-1)) > 0 # [N, K]
 
         x2_pos = ((t2_k_masks * self.grid.unsqueeze(-1)).sum(dim=[2,3]) / (t2_k_masks.sum(dim=[2,3]) + 1e-6)).unsqueeze(-1)  # [N, K, 1]
         y2_pos = ((t2_k_masks * self.grid.unsqueeze(-2)).sum(dim=[2,3]) / (t2_k_masks.sum(dim=[2,3]) + 1e-6)).unsqueeze(-1)  # [N, K, 1]
@@ -334,6 +359,7 @@ class SlotConSPR(SlotCon):
         t2_k_wpos = F.normalize(t2_k_wpos.float(), p=2., dim=-1, eps=1e-3)
         t1_k_predicted = F.normalize(t1_k_predicted.float(), p=2., dim=-1, eps=1e-3)
 
-        spr_loss = F.mse_loss(t1_k_predicted, t2_k_wpos * (t2_k_masks.sum(-1).sum(-1) > 0).unsqueeze(-1).float())
+        spr_loss = self.spr_loss(t1_k_predicted, t2_k_wpos, t2_k_slot_masks)
 
-        return self.spr_lambda * spr_loss + (1. - self.spr_lambda) * slotcon_loss
+
+        return self.spr_weight * spr_loss + (1. - self.spr_weight) * slotcon_loss

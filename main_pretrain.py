@@ -69,6 +69,7 @@ def get_parser():
     parser.add_argument('--slotcon', type=str, default='default', choices=['default', 'spr'])
     parser.add_argument('--transition-enc-layers', type=int, default=3)
     parser.add_argument('--transition-enc-heads', type=int, default=2)
+    parser.add_argument('--spr-loss', type=str, default='mse')
     parser.add_argument('--spr-lambda', type=float, default=0.5)
     parser.add_argument('--spr-skip', type=int, default=0)
 

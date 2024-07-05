@@ -7,10 +7,11 @@ arch=$1
 dim_out=$2
 dim_hidden=$3
 spr_lambda=$4
-game=$5
+spr_loss=$5
+game=$6
 
 data_dir="../atari_ds/${game}_128"
-output_dir="./output/slotcon_spr_atari_${game}_${arch}_${dim_out}_${dim_hidden}_${spr_lambda}_800ep"
+output_dir="./output/slotcon_spr_atari_${game}_${arch}_${dim_out}_${dim_hidden}_${spr_lambda}_${spr_loss}_800ep"
 
 echo ${output_dir}
 
@@ -46,5 +47,6 @@ CUDA_VISIBLE_DEVICES=0,1 torchrun --nproc_per_node=2 \
     \
     --slotcon spr \
     --spr-lambda ${spr_lambda} \
-    --spr-skip 1
+    --spr-skip 1 \
+    --spr-loss ${spr_loss}
     
