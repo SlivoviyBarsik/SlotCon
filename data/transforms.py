@@ -355,13 +355,13 @@ class CustomDataAugmentation(object):
         # first global crop
         self.global_transfo1 = transforms.Compose([
             color_jitter,
-            CustomRandomApply(CustomGaussianBlur(5, (.1, 2.)), prob=1.),
+            CustomRandomApply(CustomGaussianBlur(5, (1.5, 1.5)), prob=1.),
             normalize,
         ])
         # second global crop
         self.global_transfo2 = transforms.Compose([
             color_jitter,
-            CustomRandomApply(CustomGaussianBlur(5, (.1, 2.)), prob=0.1),
+            CustomRandomApply(CustomGaussianBlur(5, (1.5, 1.5)), prob=0.1),
             CustomSolarize(p=0.2),
             normalize,
         ])
