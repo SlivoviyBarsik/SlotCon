@@ -16,6 +16,7 @@ arch=$1
 dim_out=$2
 dim_hidden=$3
 game=$4
+num_prots=$5
 
 # trap handler - resubmit ourselves
 handler()
@@ -24,18 +25,18 @@ handler()
 	
 	kill -SIGUSR1 "$child" 
 	cd
-        sbatch ~/SlotCon/slurm_scripts/job-atari "$arch" "$dim_out" "$dim_hidden" "$game"
-	echo $arc $dim_out $dim_hidden
+        sbatch ~/SlotCon/slurm_scripts/job-atari "$arch" "$dim_out" "$dim_hidden" "$game" "$num_prots"
+	echo $arc $dim_out $dim_hidden $game $num_prots
 }
 # register signal handler
 trap handler SIGUSR1
 trap 'kill -SIGUSR1 "$child"' SIGTERM
 
-echo $1 $2 $3 $4
+echo $1 $2 $3 $4 $5
 cd ~/SlotCon
 source ./venv/bin/activate
 
-bash scripts/slotcon_atari_800ep.sh $arch $dim_out $dim_hidden $game 32 &
+bash scripts/slotcon_atari_800ep.sh $arch $dim_out $dim_hidden $game $num_prots &
 child=$!
 
 wait "$child"
