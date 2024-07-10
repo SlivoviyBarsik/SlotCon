@@ -73,7 +73,7 @@ def get_parser():
     parser.add_argument('--spr-lambda', type=float, default=0.5)
     parser.add_argument('--spr-skip', type=int, default=0)
     parser.add_argument('--padding', type=int, default=4)
-    parser.add_argument('--slotcon-augm', type=bool, default=False)
+    parser.add_argument('--slotcon-augm', type=int, default=0)
     parser.add_argument('--solarize-p', type=float, default=0.2)
 
     args = parser.parse_args()

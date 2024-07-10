@@ -25,7 +25,7 @@ handler()
 	
 	kill -SIGUSR1 "$child" 
 	cd
-        sbatch ~/SlotCon/slurm_scripts/job-augms "$nslotcon_augm" "$padding" "$solarize_p" "$game" "$num_prots"
+        sbatch ~/SlotCon/slurm_scripts/job-augms "$slotcon_augm" "$padding" "$solarize_p" "$game" "$num_prots"
 	echo $slotcon_augm $padding $solarize_p $game $num_prots
 }
 # register signal handler

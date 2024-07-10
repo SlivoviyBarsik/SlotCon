@@ -334,6 +334,68 @@ class CustomRandomApply(nn.Module):
         return output
 
 
+class BatchTwoCrop(object):
+    def __init__(self, size: int, scale: Tuple[float, float], ratio: Tuple[float, float]=(3./4.,4./3.), 
+                 interpolation=TF.InterpolationMode.BILINEAR, *args, **kwargs):
+        if isinstance(size, (tuple, list)):
+            self.size = size
+        else:
+            self.size = (size, size)
+
+        if (scale[0] > scale[1]) or (ratio[0] > ratio[1]):
+            warnings.warn("range should be of kind (min, max)")
+
+        self.interpolation = interpolation
+
+        self.scale = scale
+        self.ratio = ratio
+        self.condition_overlap = True 
+
+    def crop(self, img: torch.Tensor):
+        width, height = img.shape[-2:]
+        area = width * height
+
+        target_area = (torch.rand(1) * (self.scale[1] - self.scale[0]) + self.scale[0]) * area 
+        log_ratio = (math.log(self.ratio[0]), math.log(self.ratio[1]))
+        aspect_ratio = torch.exp(torch.rand(1) * (log_ratio[1] - log_ratio[0]) + log_ratio[0])
+
+        w = torch.round(torch.sqrt(target_area * aspect_ratio)).int()
+        h = torch.round(torch.sqrt(target_area / aspect_ratio)).int()
+
+        w = w.clamp(max=width-1)
+        h = h.clamp(max=height-1)
+
+        i = torch.randint(0, height - h, [1]) 
+        j = torch.randint(0, width - w, [1]) 
+
+        
+        img_crop = TF.resized_crop(img, i, j, h, w, img.shape[-2:], interpolation=self.interpolation)
+        return img_crop, [i,j,h,w]
+
+    def __call__(self, images: torch.Tensor):
+        (crop_q, params0), (crop_k, params1) = self.crop(images), self.crop(images)
+
+        y1_q, x1_q, height_q, width_q = params0 
+        y1_k, x1_k, height_k, width_k = params1 
+
+        x2_q = x1_q + width_q
+        y2_q = y1_q + height_q
+        x2_k = x1_k + width_k
+        y2_k = y1_k + height_k
+
+        x1_n, y1_n = torch.max(x1_q, x1_k), torch.max(y1_q, y1_k)
+        x2_n, y2_n = torch.min(x2_q, x2_k), torch.min(y2_q, y2_k)
+
+        coord_q = torch.Tensor([(x1_n - x1_q) / width_q, (y1_n - y1_q) / height_q, 
+                                (x2_n - x1_q) / width_q, (y2_n - y1_q) / height_q])
+        
+        
+        coord_k = torch.Tensor([(x1_n - x1_k) / width_k, (y1_n - y1_k) / height_k, 
+                                (x2_n - x1_k) / width_k, (y2_n - y1_k) / height_k])
+        
+        return [crop_q, crop_k], (coord_q.unsqueeze(-1).repeat((1,crop_q.shape[0])), coord_k.unsqueeze(-1).repeat((1,crop_k.shape[0])))
+
+
 class CustomDataAugmentation(object):
     def __init__(self, size=224, min_scale=0.08, padding=4, slotcon_augm=False, solarize_p=0.2, expect_tensors: bool=False):
         color_jitter = transforms.Compose([
@@ -349,7 +411,7 @@ class CustomDataAugmentation(object):
         ])
 
         if slotcon_augm:
-            self.two_crop = CustomTwoCrop(size, (min_scale, 1), interpolation=TF.InterpolationMode.BICUBIC)
+            self.two_crop = BatchTwoCrop(size, (min_scale, 1), interpolation=TF.InterpolationMode.BICUBIC)
         else:
             self.two_crop = SPRTwoCrop(size, padding=padding)
 
