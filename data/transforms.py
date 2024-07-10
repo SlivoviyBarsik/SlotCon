@@ -335,7 +335,7 @@ class CustomRandomApply(nn.Module):
 
 
 class CustomDataAugmentation(object):
-    def __init__(self, size=224, min_scale=0.08, expect_tensors: bool=False):
+    def __init__(self, size=224, min_scale=0.08, padding=4, slotcon_augm=False, solarize_p=0.2, expect_tensors: bool=False):
         color_jitter = transforms.Compose([
             CustomRandomApply(
                 CustomColorJitter(brightness=0.4, contrast=0.4, saturation=0.2, hue=0.1),
@@ -348,8 +348,11 @@ class CustomDataAugmentation(object):
             transforms.Normalize((0.485, 0.456, 0.406), (0.229, 0.224, 0.225)),
         ])
 
-        # self.two_crop = CustomTwoCrop(size, (min_scale, 1), interpolation=TF.InterpolationMode.BICUBIC)
-        self.two_crop = SPRTwoCrop(size, padding=4)
+        if slotcon_augm:
+            self.two_crop = CustomTwoCrop(size, (min_scale, 1), interpolation=TF.InterpolationMode.BICUBIC)
+        else:
+            self.two_crop = SPRTwoCrop(size, padding=padding)
+
         self.hflip = CustomBatchRandomHorFlip(p=0.5)
 
         # first global crop
@@ -362,7 +365,7 @@ class CustomDataAugmentation(object):
         self.global_transfo2 = transforms.Compose([
             color_jitter,
             CustomRandomApply(CustomGaussianBlur(5, (1.5, 1.5)), prob=0.1),
-            CustomSolarize(p=0.2),
+            CustomSolarize(p=solarize_p),
             normalize,
         ])
 

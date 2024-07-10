@@ -1,0 +1,42 @@
+#!/bin/bash
+#SBATCH -N 1            # number of nodes on which to run
+#SBATCH --gres=gpu:rtx6000:1        # number of gpus
+#SBATCH --ntasks=8
+#SBATCH --tasks-per-node=8
+#SBATCH --cpus-per-task=4
+#SBATCH --exclude="gpu138"
+#SBATCH --time=4:00:00      # time limit
+#SBATCH --mem=64GB         # minimum amount of real memory
+#SBATCH --job-name=slotcon
+#SBATCH --open-mode=append
+#SBATCH --qos=m3
+#SBATCH --signal=B:USR1@30
+
+slotcon_augm=$1
+padding=$2
+solarize_p=$3
+game=$4
+num_prots=$5
+
+# trap handler - resubmit ourselves
+handler()
+{
+        echo "function handler called at $(date)"	
+	
+	kill -SIGUSR1 "$child" 
+	cd
+        sbatch ~/SlotCon/slurm_scripts/job-augms "$nslotcon_augm" "$padding" "$solarize_p" "$game" "$num_prots"
+	echo $slotcon_augm $padding $solarize_p $game $num_prots
+}
+# register signal handler
+trap handler SIGUSR1
+trap 'kill -SIGUSR1 "$child"' SIGTERM
+
+echo $1 $2 $3 $4 $5
+cd ~/SlotCon
+source ./venv/bin/activate
+
+bash scripts/slotcon_atari_augms.sh $slotcon_augm $padding $solarize_p $game $num_prots &
+child=$!
+
+wait "$child"
