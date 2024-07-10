@@ -154,6 +154,7 @@ def main(args):
     # prepare data
     transform = CustomDataAugmentation(args.image_size, args.min_scale, args.padding, args.slotcon_augm, 
                                        args.solarize_p, expect_tensors=args.dataset=="atari")
+    train_dataset = ImageFolder(args.dataset, args.data_dir, transform, args.spr_skip)
     train_sampler = torch.utils.data.distributed.DistributedSampler(train_dataset)
     train_loader = torch.utils.data.DataLoader(
         train_dataset, batch_size=args.batch_size, shuffle=(train_sampler is None), 
