@@ -8,6 +8,10 @@ import torch.nn as nn
 import torchvision.transforms as transforms
 import torchvision.transforms.functional as TF
 
+from PIL import ImageFilter, ImageOps
+from PIL.Image import Image
+
+
 from kornia.filters.gaussian import GaussianBlur2d
 from kornia.augmentation import RandomSolarize, ColorJitter
 
@@ -100,7 +104,7 @@ class SPRTwoCrop(object):
 
 class CustomTwoCrop(object):
     def __init__(self, size=224, scale=(0.2, 1.0), ratio=(3. / 4., 4. / 3.), interpolation=TF.InterpolationMode.BILINEAR,
-                condition_overlap=True):
+                condition_overlap=True, global_crop=True):
         if isinstance(size, (tuple, list)):
             self.size = size
         else:
@@ -114,6 +118,11 @@ class CustomTwoCrop(object):
         self.scale = scale
         self.ratio = ratio
         self.condition_overlap = condition_overlap
+        self.global_crop = global_crop
+
+        if self.global_crop:
+            self.padding = 4
+            self.pad = transforms.Pad(self.padding, padding_mode="edge")
 
     @staticmethod
     def get_params(img, scale, ratio, ):
@@ -198,13 +207,23 @@ class CustomTwoCrop(object):
         params1 = self.get_params(img, self.scale, self.ratio)
         coords.append(_get_coord(*params1))
         crops.append(TF.resized_crop(img, *params1, self.size, self.interpolation))
+        
+        if self.global_crop:
+            padded_img = self.pad(img)
+            params2 = [random.randint(0, 2*self.padding), random.randint(0, 2*self.padding), *self.size]
 
-        if not self.condition_overlap:
-            params2 = self.get_params(img, self.scale, self.ratio)
+            coords[0][0] += self.padding
+            coords[0][1] += self.padding
+
+            coords.append(_get_coord(*params2))
+            crops.append(TF.crop(padded_img, *params2))
         else:
-            params2 = self.get_params_conditioned(img, self.scale, self.ratio, params1)
-        coords.append(_get_coord(*params2))
-        crops.append(TF.resized_crop(img, *params2, self.size, self.interpolation))
+            if not self.condition_overlap:
+                params2 = self.get_params(img, self.scale, self.ratio)
+            else:
+                params2 = self.get_params_conditioned(img, self.scale, self.ratio, params1)
+            coords.append(_get_coord(*params2))
+            crops.append(TF.resized_crop(img, *params2, self.size, self.interpolation))
 
         return crops, _clip_coords(coords, [params1, params2])
 
@@ -396,13 +415,47 @@ class BatchTwoCrop(object):
         return [crop_q, crop_k], (coord_q.unsqueeze(-1).repeat((1,crop_q.shape[0])), coord_k.unsqueeze(-1).repeat((1,crop_k.shape[0])))
 
 
+class GaussianBlur(nn.Module):
+    """Gaussian blur augmentation in SimCLR https://arxiv.org/abs/2002.05709"""
+
+    def __init__(self, sigma=[.1, 2.]):
+        super().__init__()
+        self.sigma = sigma
+
+    def __call__(self, x):
+        sigma = random.uniform(self.sigma[0], self.sigma[1])
+
+        if not isinstance(x, Image):
+            pil_imgs = [TF.pil_to_tensor(TF.to_pil_image(i).filter(ImageFilter.GaussianBlur(radius=sigma))) for i in x]
+            return torch.stack(pil_imgs)
+
+        x = x.filter(ImageFilter.GaussianBlur(radius=sigma))
+        return x
+
+
+class Solarize(nn.Module):
+    def __init__(self, threshold=128):
+        super().__init__()
+        self.threshold = threshold
+
+    def __call__(self, sample):
+        if not isinstance(sample, Image):
+            pil_imgs = [TF.pil_to_tensor(ImageOps.solarize(TF.to_pil_image(i), self.threshold)) for i in sample]
+            return torch.stack(pil_imgs)
+
+        return ImageOps.solarize(sample, self.threshold)
+
+
+
 class CustomDataAugmentation(object):
-    def __init__(self, size=224, min_scale=0.08, padding=4, slotcon_augm=False, solarize_p=0.2, expect_tensors: bool=False):
+    def __init__(self, size=224, min_scale=0.08, padding=4, slotcon_augm=False, solarize_p=0.2, global_crop=True, 
+                 expect_tensors: bool=False):
         color_jitter = transforms.Compose([
-            CustomRandomApply(
-                CustomColorJitter(brightness=0.4, contrast=0.4, saturation=0.2, hue=0.1),
-                prob=0.8
+            transforms.RandomApply(
+                [transforms.ColorJitter(brightness=0.4, contrast=0.4, saturation=0.2, hue=0.1)],
+                p=0.8
             ),
+            # CustomRandomApply(
             transforms.RandomGrayscale(p=0.2),
         ])
         normalize = transforms.Compose([
@@ -410,24 +463,30 @@ class CustomDataAugmentation(object):
             transforms.Normalize((0.485, 0.456, 0.406), (0.229, 0.224, 0.225)),
         ])
 
-        if slotcon_augm:
+        if True:
+            self.two_crop = CustomTwoCrop(size, (min_scale, 1), interpolation=TF.InterpolationMode.BICUBIC,
+                                          global_crop=global_crop)
+        elif slotcon_augm:
             self.two_crop = BatchTwoCrop(size, (min_scale, 1), interpolation=TF.InterpolationMode.BICUBIC)
         else:
             self.two_crop = SPRTwoCrop(size, padding=padding)
 
-        self.hflip = CustomBatchRandomHorFlip(p=0.5)
+        self.hflip = CustomRandomHorizontalFlip(p=0.5)
 
         # first global crop
         self.global_transfo1 = transforms.Compose([
             color_jitter,
-            CustomRandomApply(CustomGaussianBlur(5, (1.5, 1.5)), prob=1.),
+            transforms.RandomApply([GaussianBlur([.1, 2.])], p=1.),
+            # CustomRandomApply(CustomGaussianBlur(5, (1.5, 1.5)), prob=1.),
             normalize,
         ])
         # second global crop
         self.global_transfo2 = transforms.Compose([
             color_jitter,
-            CustomRandomApply(CustomGaussianBlur(5, (1.5, 1.5)), prob=0.1),
-            CustomSolarize(p=solarize_p),
+            transforms.RandomApply([GaussianBlur([.1, 2.])], p=0.1),
+            transforms.RandomApply([Solarize()], p=solarize_p),
+            # CustomRandomApply(CustomGaussianBlur(5, (1.5, 1.5)), prob=0.1),
+            # CustomSolarize(p=solarize_p),
             normalize,
         ])
 
@@ -435,8 +494,8 @@ class CustomDataAugmentation(object):
         crops, coords = self.two_crop(image)
         crops, coords, flags = self.hflip(crops, coords)
         crops_transformed = []
-        crops_transformed.append(self.global_transfo1(crops[0]))
-        crops_transformed.append(self.global_transfo2(crops[1]))
+        crops_transformed.append(self.global_transfo1(crops[0].unsqueeze(0)))
+        crops_transformed.append(self.global_transfo2(crops[1].unsqueeze(0)))
         return crops_transformed, coords, flags
     
 class DummyAugmentation(object):

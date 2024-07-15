@@ -1,6 +1,6 @@
 #!/bin/bash
 #SBATCH -N 1            # number of nodes on which to run
-#SBATCH --gres=gpu:1        # number of gpus
+#SBATCH --gres=gpu:rtx6000:1        # number of gpus
 #SBATCH --ntasks=8
 #SBATCH --tasks-per-node=8
 #SBATCH --cpus-per-task=4
@@ -12,10 +12,8 @@
 #SBATCH --qos=scavenger
 #SBATCH --signal=B:USR1@30
 
-arch=$1
-dim_out=$2
-dim_hidden=$3
-game=$4
+script=$1
+params=$2
 
 # trap handler - resubmit ourselves
 handler()
@@ -24,18 +22,18 @@ handler()
 	
 	kill -SIGUSR1 "$child" 
 	cd
-        sbatch ~/SlotCon/slurm_scripts/job-atari "$arch" "$dim_out" "$dim_hidden" "$game"
+        sbatch ~/SlotCon/slurm_scripts/job-atari "$script" "$params"
 	echo $arc $dim_out $dim_hidden
 }
 # register signal handler
 trap handler SIGUSR1
 trap 'kill -SIGUSR1 "$child"' SIGTERM
 
-echo $1 $2 $3 $4
+echo $1 $2
 cd ~/SlotCon
 source ./venv/bin/activate
 
-bash scripts/slotcon_atari_800ep.sh $arch $dim_out $dim_hidden $game 32 &
+bash $script $params &
 child=$!
 
 wait "$child"
