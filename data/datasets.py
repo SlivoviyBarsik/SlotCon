@@ -48,6 +48,11 @@ class ImageFolder(Dataset):
             actions = data[0]['action']  # [1]
             frames = np.stack([frame_1, frame_k])  # [2, 3, H, W]
 
+            return self.transform(torch.from_numpy(frame_1)), torch.from_numpy(actions)
+        
+        image = Image.open(fpath).convert('RGB')
+        return self.transform(image), torch.empty(1)
+
             return self.transform(torch.from_numpy(frames)), torch.from_numpy(actions)
         
         image = Image.open(fpath).convert('RGB')

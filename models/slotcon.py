@@ -199,9 +199,12 @@ class SlotCon(nn.Module):
     def forward(self, input, action=None, return_q1_aligned=False, *args):
         crops, coords, flags = input
         if len(crops[0].shape) > 4: 
-            crops = [crops[0][:,0], crops[1][:,0]]  # ignore stack
-            coords = [coords[0][...,0], coords[1][...,0]]
-            flags = [f[...,0] for f in flags]
+            if crops[0].shape[1] == 1:
+                crops = [crop.squeeze(1) for crop in crops]
+            else:
+                crops = [crops[0][:,0], crops[1][:,0]]  # ignore stack
+                coords = [coords[0][...,0], coords[1][...,0]]
+                flags = [f[...,0] for f in flags]
         x1, x2 = self.projector_q(self.encoder_q(crops[0])), self.projector_q(self.encoder_q(crops[1]))
         with torch.no_grad():  # no gradient to keys
             self._momentum_update_key_encoder()  # update the key encoder

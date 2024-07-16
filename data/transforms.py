@@ -494,8 +494,8 @@ class CustomDataAugmentation(object):
         crops, coords = self.two_crop(image)
         crops, coords, flags = self.hflip(crops, coords)
         crops_transformed = []
-        crops_transformed.append(self.global_transfo1(crops[0].unsqueeze(0)))
-        crops_transformed.append(self.global_transfo2(crops[1].unsqueeze(0)))
+        crops_transformed.append(self.global_transfo1(crops[0].unsqueeze(0)).squeeze(0))
+        crops_transformed.append(self.global_transfo2(crops[1].unsqueeze(0)).squeeze(0))
         return crops_transformed, coords, flags
     
 class DummyAugmentation(object):
