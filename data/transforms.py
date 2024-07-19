@@ -226,6 +226,32 @@ class CustomTwoCrop(object):
             crops.append(TF.resized_crop(img, *params2, self.size, self.interpolation))
 
         return crops, _clip_coords(coords, [params1, params2])
+    
+
+class CustomTwoCrop_SPR(CustomTwoCrop):
+    def __init__(self, size=224, scale=(0.2, 1), ratio=(3 / 4, 4 / 3), interpolation=TF.InterpolationMode.BILINEAR, condition_overlap=True, global_crop=True):
+        super().__init__(size, scale, ratio, interpolation, condition_overlap, global_crop)
+
+    def __call__(self, img):
+        assert img.shape[0] == 2
+
+        crops, cur_coords = [], []
+        params_cur1 = self.get_params(img[0], self.scale, self.ratio)
+        cur_coords.append(_get_coord(*params_cur1))
+        crops.append(TF.resized_crop(img[0], *params_cur1, self.size, self.interpolation))
+
+        if not self.condition_overlap:
+            params_cur2 = self.get_params(img[0], self.scale, self.ratio)
+        else:
+            params_cur2 = self.get_params_conditioned(img, self.scale, self.ratio, params_cur1)
+        cur_coords.append(_get_coord(*params_cur2))  
+        crops.append(TF.resized_crop(img[0], *params_cur2, self.size, self.interpolation))  
+
+        crops.append(img[-1])
+        cur1_k = _clip_coords([cur_coords[0], torch.Tensor([0., 0., *img.shape[-2:]])], [params_cur1, [0, 0, *img.shape[-2:]]])
+        cur2_k = _clip_coords([cur_coords[1], torch.Tensor([0., 0., *img.shape[-2:]])], [params_cur2, [0, 0, *img.shape[-2:]]])
+
+        return crops, _clip_coords(cur_coords, [params_cur1, params_cur2]), (cur1_k, cur2_k)
 
 
 class CustomRandomHorizontalFlip(nn.Module):
@@ -251,6 +277,40 @@ class CustomRandomHorizontalFlip(nn.Module):
             flags_flipped.append(flag_flipped)
 
         return crops_flipped, coords_flipped, flags_flipped
+    
+
+class CustomRandomHorizontalFlip_SPR(CustomRandomHorizontalFlip):
+    def __call__(self, crops, coords_cur, coords_next):
+        flip1, flip2 = torch.rand(1) < self.p, torch.rand(1) < self.p 
+        flags = [flip1.item(), flip2.item()]
+
+        if flip1:
+            crops[0] = TF.hflip(crops[0])
+            coord = coords_cur[0].clone()
+
+            coord[0] = 1. - coords_cur[0][2]
+            coord[2] = 1. - coords_cur[0][0]
+            coords_cur[0] = coord  
+
+            coord = coords_next[0][1].clone()
+            coord[0] = 1. - coords_next[0][1][2]
+            coord[2] = 1. - coords_next[0][1][0]
+            coords_next[0][1] = coord
+
+        if flip2:
+            crops[1] = TF.hflip(crops[1])
+            coord = coords_cur[1].clone()
+
+            coord[0] = 1. - coords_cur[1][2]
+            coord[2] = 1. - coords_cur[1][0]
+            coords_cur[1] = coord  
+
+            coord = coords_next[1][1].clone()
+            coord[0] = 1. - coords_next[1][1][2]
+            coord[2] = 1. - coords_next[1][1][0]
+            coords_next[1][1] = coord
+
+        return crops, coords_cur, coords_next, flags
     
 class CustomBatchRandomHorFlip(nn.Module):
     def __init__(self, p=0.5):
@@ -455,7 +515,6 @@ class CustomDataAugmentation(object):
                 [transforms.ColorJitter(brightness=0.4, contrast=0.4, saturation=0.2, hue=0.1)],
                 p=0.8
             ),
-            # CustomRandomApply(
             transforms.RandomGrayscale(p=0.2),
         ])
         normalize = transforms.Compose([
@@ -466,18 +525,12 @@ class CustomDataAugmentation(object):
         if True:
             self.two_crop = CustomTwoCrop(size, (min_scale, 1), interpolation=TF.InterpolationMode.BICUBIC,
                                           global_crop=global_crop)
-        elif slotcon_augm:
-            self.two_crop = BatchTwoCrop(size, (min_scale, 1), interpolation=TF.InterpolationMode.BICUBIC)
-        else:
-            self.two_crop = SPRTwoCrop(size, padding=padding)
 
         self.hflip = CustomRandomHorizontalFlip(p=0.5)
 
-        # first global crop
         self.global_transfo1 = transforms.Compose([
             color_jitter,
             transforms.RandomApply([GaussianBlur([.1, 2.])], p=1.),
-            # CustomRandomApply(CustomGaussianBlur(5, (1.5, 1.5)), prob=1.),
             normalize,
         ])
         # second global crop
@@ -485,8 +538,6 @@ class CustomDataAugmentation(object):
             color_jitter,
             transforms.RandomApply([GaussianBlur([.1, 2.])], p=0.1),
             transforms.RandomApply([Solarize()], p=solarize_p),
-            # CustomRandomApply(CustomGaussianBlur(5, (1.5, 1.5)), prob=0.1),
-            # CustomSolarize(p=solarize_p),
             normalize,
         ])
 
@@ -497,6 +548,52 @@ class CustomDataAugmentation(object):
         crops_transformed.append(self.global_transfo1(crops[0].unsqueeze(0)).squeeze(0))
         crops_transformed.append(self.global_transfo2(crops[1].unsqueeze(0)).squeeze(0))
         return crops_transformed, coords, flags
+    
+
+class CustomDataAugmentation_SPR(CustomDataAugmentation):
+    def __init__(self, size=224, min_scale=0.08, padding=4, slotcon_augm=False, solarize_p=0.2, global_crop=True, 
+                 expect_tensors: bool=False):
+        color_jitter = transforms.Compose([
+            transforms.RandomApply(
+                [transforms.ColorJitter(brightness=0.4, contrast=0.4, saturation=0.2, hue=0.1)],
+                p=0.8
+            ),
+            transforms.RandomGrayscale(p=0.2),
+        ])
+        normalize = transforms.Compose([
+            TensorToTensor() if expect_tensors else transforms.ToTensor(),
+            transforms.Normalize((0.485, 0.456, 0.406), (0.229, 0.224, 0.225)),
+        ])
+
+
+        self.two_crop = CustomTwoCrop_SPR(size, (min_scale, 1), interpolation=TF.InterpolationMode.BICUBIC,
+                                          global_crop=global_crop)
+
+        self.hflip = CustomRandomHorizontalFlip_SPR(p=0.5)
+
+        self.global_transfo1 = transforms.Compose([
+            color_jitter,
+            transforms.RandomApply([GaussianBlur([.1, 2.])], p=1.),
+            normalize,
+        ])
+        # second global crop
+        self.global_transfo2 = transforms.Compose([
+            color_jitter,
+            transforms.RandomApply([GaussianBlur([.1, 2.])], p=0.1),
+            transforms.RandomApply([Solarize()], p=solarize_p),
+            normalize,
+        ])
+
+    def __call__(self, image):
+        crops, cur_coords, next_coords = self.two_crop(image)
+        crops, cur_coords, next_coords, flags = self.hflip(crops, cur_coords, next_coords)
+        crops_transformed = []
+        crops_transformed.append(self.global_transfo1(crops[0].unsqueeze(0)).squeeze(0))
+        crops_transformed.append(self.global_transfo2(crops[1].unsqueeze(0)).squeeze(0))
+
+        crops_transformed.append(self.global_transfo1(crops[2].unsqueeze(0)).squeeze(0))
+        return crops_transformed, (cur_coords, next_coords), flags 
+
     
 class DummyAugmentation(object):
     def __init__(self):

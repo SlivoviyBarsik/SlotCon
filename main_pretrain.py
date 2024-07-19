@@ -12,7 +12,7 @@ import torch.distributed as dist
 import torch.backends.cudnn as cudnn
 
 from data.datasets import ImageFolder
-from data.transforms import CustomDataAugmentation
+from data.transforms import CustomDataAugmentation, CustomDataAugmentation_SPR
 
 from models import resnet
 from models.slotcon import SlotCon, SlotConSPR
@@ -153,8 +153,12 @@ def main(args):
         torch.cuda.manual_seed_all(args.seed)
 
     # prepare data
-    transform = CustomDataAugmentation(args.image_size, args.min_scale, args.padding, args.slotcon_augm, 
+    if args.slotcon == 'spr':
+        transform = CustomDataAugmentation_SPR(args.image_size, args.min_scale, args.padding, args.slotcon_augm, 
                                        args.solarize_p, args.global_crop, expect_tensors=args.dataset=="atari")
+    else:
+        transform = CustomDataAugmentation(args.image_size, args.min_scale, args.padding, args.slotcon_augm, 
+                                        args.solarize_p, args.global_crop, expect_tensors=args.dataset=="atari")
     train_dataset = ImageFolder(args.dataset, args.data_dir, transform, args.spr_skip)
     train_sampler = torch.utils.data.distributed.DistributedSampler(train_dataset)
     train_loader = torch.utils.data.DataLoader(
@@ -209,7 +213,8 @@ def train(train_loader, model, optimizer, scaler, scheduler, epoch, args):
     for i, batch in enumerate(train_loader):
         (crops, coords, flags), action = batch
         crops = [crop.cuda(non_blocking=True) for crop in crops]
-        coords = [coord.cuda(non_blocking=True) for coord in coords]
+        if isinstance(coords[0], torch.Tensor):
+            coords = [coord.cuda(non_blocking=True) for coord in coords]
         flags = [flag.cuda(non_blocking=True) for flag in flags]
 
         # compute output and loss

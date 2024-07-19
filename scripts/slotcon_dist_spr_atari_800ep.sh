@@ -11,7 +11,7 @@ spr_loss=$5
 game=$6
 
 data_dir="../atari_ds/${game}_128"
-output_dir="./output/slotcon_spr_atari_${game}_${arch}_${dim_out}_${dim_hidden}_${spr_lambda}_${spr_loss}_800ep"
+output_dir="./output/SPR_${game}_${arch}_${dim_out}_${dim_hidden}_${spr_lambda}_${spr_loss}_800ep"
 
 echo ${output_dir}
 

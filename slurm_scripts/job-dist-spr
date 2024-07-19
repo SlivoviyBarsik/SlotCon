@@ -12,12 +12,8 @@
 #SBATCH --qos=m2
 #SBATCH --signal=B:USR1@30
 
-arch=$1
-dim_out=$2
-dim_hidden=$3
-spr_lambda=$4
-spr_loss=$5
-game=$6
+script=$1
+params=$2
 
 # trap handler - resubmit ourselves
 handler()
@@ -26,18 +22,18 @@ handler()
 	
 	kill -SIGUSR1 "$child" 
 	cd
-        sbatch ~/SlotCon/slurm_scripts/job-dist-spr "$arch" "$dim_out" "$dim_hidden" "$spr_lambda" "$spr_loss" "$game"
-	echo $arc $dim_out $dim_hidden
+        sbatch ~/SlotCon/slurm_scripts/job-dist-spr "$script" "$params"
+	echo $script $params
 }
 # register signal handler
 trap handler SIGUSR1
 trap 'kill -SIGUSR1 "$child"' SIGTERM
 
-echo $1 $2 $3 $4 $5
+echo $1 $2
 cd ~/SlotCon
 source ./venv/bin/activate
 
-bash scripts/slotcon_dist_spr_atari_800ep.sh $arch $dim_out $dim_hidden $spr_lambda $spr_loss $game &
+bash $script $params &
 
 child=$!
 
