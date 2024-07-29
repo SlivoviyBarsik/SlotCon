@@ -3,8 +3,10 @@ import random
 from typing import List, Tuple
 import warnings
 
+import kornia
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 import torchvision.transforms as transforms
 import torchvision.transforms.functional as TF
 
@@ -51,56 +53,6 @@ def _clip_coords(coords, params):
     return [coord_q_clipped, coord_k_clipped]
 
 
-class SPRTwoCrop(object):
-    def __init__(self, size=128, padding=4):
-        if isinstance(size, (tuple, list)):
-            self.size = size 
-        else:
-            self.size = (size, size)
-
-        self.pad = nn.ReplicationPad2d(padding)
-        self.pad_size = padding
-
-    def __call__(self, img: torch.Tensor) -> Tuple[Tuple[torch.Tensor, torch.Tensor], Tuple[List, List]]:
-        """
-        img: torch.Tensor, [N, C, H, W]
-        """
-        assert img.shape[-2:] == self.size, f'Expected image of size {self.size}, got shape {img.shape[-2:]} instead'
-
-        x0, x1 = torch.randint(0, 2*self.pad_size, img.shape[:-3]), torch.randint(0, 2*self.pad_size, img.shape[:-3])
-        y0, y1 = torch.randint(0, 2*self.pad_size, img.shape[:-3]), torch.randint(0, 2*self.pad_size, img.shape[:-3])
-
-        padded_img = self.pad(img)  # [N, C, H+2*padding, W+2*padding]
-        
-        index0 = torch.tile(x0.unsqueeze(1) + torch.arange(0, self.size[1]).unsqueeze(0), (1, self.size[0])) + \
-            torch.repeat_interleave(y0.unsqueeze(1) + torch.arange(0, self.size[0]), self.size[1], 1) * padded_img.shape[-1]
-        index0 = index0.unsqueeze(1).repeat((1,img.shape[1],1))  # [N, C, H, W]
-
-        index1 = torch.tile(x1.unsqueeze(1) + torch.arange(0, self.size[1]).unsqueeze(0), (1, self.size[0])) + \
-            torch.repeat_interleave(y1.unsqueeze(1) + torch.arange(0, self.size[0]), self.size[1], 1) * padded_img.shape[-1]
-        index1 = index1.unsqueeze(1).repeat((1,img.shape[1],1))  # [N, C, H, W]
-
-        crop0 = torch.gather(padded_img.flatten(-2,-1), 2, index0.to(padded_img.device))
-        crop0 = crop0.reshape(img.shape)
-
-        crop1 = torch.gather(padded_img.flatten(-2,-1), 2, index1.to(padded_img.device))
-        crop1 = crop1.reshape(img.shape)
-
-        # TODO: check that reshapes yield correct results
-
-        x1_n = torch.stack([x0, x1]).max(0).values 
-        y1_n = torch.stack([y0, y1]).max(0).values
-
-        x2_n = torch.stack([x0, x1]).min(0).values + self.size[1]
-        y2_n = torch.stack([y0, y1]).min(0).values + self.size[0]
-
-        coords0 = torch.stack([(x1_n - x0).float() / self.size[0], (y1_n - y0).float() / self.size[1],
-                   (x2_n - x0).float() / self.size[0], (y2_n - y0).float() / self.size[1]]).to(padded_img.device)
-        
-        coords1 = torch.stack([(x1_n - x1).float() / self.size[0], (y1_n - y1).float() / self.size[1],
-                   (x2_n - x1).float() / self.size[0], (y2_n - y1).float() / self.size[1]]).to(padded_img.device)
-        
-        return [crop0, crop1], [coords0, coords1]
 
 class CustomTwoCrop(object):
     def __init__(self, size=224, scale=(0.2, 1.0), ratio=(3. / 4., 4. / 3.), interpolation=TF.InterpolationMode.BILINEAR,
@@ -252,6 +204,61 @@ class CustomTwoCrop_SPR(CustomTwoCrop):
         cur2_k = _clip_coords([cur_coords[1], torch.Tensor([0., 0., *img.shape[-2:]])], [params_cur2, [0, 0, *img.shape[-2:]]])
 
         return crops, _clip_coords(cur_coords, [params_cur1, params_cur2]), (cur1_k, cur2_k)
+    
+
+class InterestingTwoCrop(CustomTwoCrop):
+    def __init__(self, temp: float=5., gauss_kernel: int=35, gauss_sigma: float=15.5, border: int=18, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+
+        self.temp = temp 
+
+        self.gauss_kernel = gauss_kernel
+        self.gauss_sigma = gauss_sigma
+
+        self.border = border
+
+    def sample_centers(self, img: torch.Tensor) -> Tuple[int]:
+        """
+        img: torch.Tensor, [3, H, W]
+        """
+        sobel_f = kornia.filters.sobel(img.float().unsqueeze(0)).max(1).values  # [1, H, W]
+        gauss_b = kornia.filters.gaussian_blur2d(sobel_f.unsqueeze(1), kernel_size=self.gauss_kernel, sigma=(self.gauss_sigma, self.gauss_sigma)).flatten(0,2)  # [H, W]
+
+        sm = F.softmax(gauss_b[self.border:img.shape[-2]-self.border, self.border:img.shape[-1]-self.border].flatten() / self.temp, -1)  # [H' * W']
+        p = torch.multinomial(sm, 1)
+
+        x = p % (img.shape[-1] - 2 * self.border) + self.border
+        y = p // (img.shape[-1] - 2 * self.border) + self.border
+
+        return x.item(), y.item() 
+
+    def get_params(self, img, scale, ratio):
+        xc, yc = self.sample_centers(img)
+        width, height = _get_image_size(img)
+        area = width * height
+
+        xmin, ymin = min(xc, width - xc) * 2, min(yc, height - yc) * 2
+        max_scale = xmin * ymin / area
+
+        target_area = random.uniform(scale[0], max_scale) * area 
+        log_ratio = (math.log(ratio[0]), math.log(ratio[1]))
+        aspect_ratio = math.exp(random.uniform(*log_ratio))
+
+        w = int(round(math.sqrt(target_area * aspect_ratio)))
+        h = int(round(math.sqrt(target_area / aspect_ratio)))
+
+        return max(yc - h // 2, 0), max(xc - w // 2, 0), h, w 
+    
+    def get_params_conditioned(self, img, scale, ratio, constraint):
+        for _ in range(10):
+            i, j, h, w = self.get_params(img, scale, ratio)
+            inter = _compute_intersection((i,j,h,w), constraint)
+            if inter > 0.01 * h * w:
+                print(inter)
+                return i, j, h, w 
+            
+        return self.get_params(img, scale, ratio)
+
 
 
 class CustomRandomHorizontalFlip(nn.Module):
@@ -508,7 +515,7 @@ class Solarize(nn.Module):
 
 
 class CustomDataAugmentation(object):
-    def __init__(self, size=224, min_scale=0.08, padding=4, slotcon_augm=False, solarize_p=0.2, global_crop=True, 
+    def __init__(self, size=224, min_scale=0.08, interest_crop: bool=False, solarize_p=0.2, global_crop=True, 
                  expect_tensors: bool=False):
         color_jitter = transforms.Compose([
             transforms.RandomApply(
@@ -522,7 +529,10 @@ class CustomDataAugmentation(object):
             transforms.Normalize((0.485, 0.456, 0.406), (0.229, 0.224, 0.225)),
         ])
 
-        if True:
+        if interest_crop:
+            self.two_crop = InterestingTwoCrop(size=size, scale=(min_scale, 1), interpolation=TF.InterpolationMode.BICUBIC,
+                                          global_crop=global_crop)
+        else:
             self.two_crop = CustomTwoCrop(size, (min_scale, 1), interpolation=TF.InterpolationMode.BICUBIC,
                                           global_crop=global_crop)
 

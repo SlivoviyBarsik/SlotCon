@@ -76,6 +76,7 @@ def get_parser():
     parser.add_argument('--slotcon-augm', type=int, default=0)
     parser.add_argument('--solarize-p', type=float, default=0.2)
     parser.add_argument('--global-crop', type=int, default=0)
+    parser.add_argument('--interest-crop', type=int, default=0)
 
     args = parser.parse_args()
     if os.environ["LOCAL_RANK"] is not None:
@@ -157,7 +158,7 @@ def main(args):
         transform = CustomDataAugmentation_SPR(args.image_size, args.min_scale, args.padding, args.slotcon_augm, 
                                        args.solarize_p, args.global_crop, expect_tensors=args.dataset=="atari")
     else:
-        transform = CustomDataAugmentation(args.image_size, args.min_scale, args.padding, args.slotcon_augm, 
+        transform = CustomDataAugmentation(args.image_size, args.min_scale, args.interest_crop, 
                                         args.solarize_p, args.global_crop, expect_tensors=args.dataset=="atari")
     train_dataset = ImageFolder(args.dataset, args.data_dir, transform, args.spr_skip)
     train_sampler = torch.utils.data.distributed.DistributedSampler(train_dataset)
