@@ -254,7 +254,6 @@ class InterestingTwoCrop(CustomTwoCrop):
             i, j, h, w = self.get_params(img, scale, ratio)
             inter = _compute_intersection((i,j,h,w), constraint)
             if inter > 0.01 * h * w:
-                print(inter)
                 return i, j, h, w 
             
         return self.get_params(img, scale, ratio)
